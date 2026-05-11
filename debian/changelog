@@ -1,0 +1,7 @@
+juju-installer (1) noble; urgency=medium
+
+  * Initial release.
+  * Wrapper to install Juju snap and bootstrap LXD controller on demand.
+  * Mirrors lxd-installer pattern with systemd socket activation.
+
+ -- Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>  Sun, 11 May 2026 23:00:00 +0000

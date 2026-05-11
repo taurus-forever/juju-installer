@@ -1,0 +1,4 @@
+sbin/juju                         sbin/
+share/juju-installer-service      usr/share/juju-installer/
+systemd/juju-installer.socket     usr/lib/systemd/system/
+systemd/juju-installer@.service   usr/lib/systemd/system/
