@@ -1,0 +1,107 @@
+#!/bin/sh
+SNAP_BIN="/snap/bin/juju"
+
+# --- Helper functions ---
+
+show_progress() {
+    printf "\r%-70s" "$1" >&2
+}
+
+clear_progress() {
+    printf "\r%-70s\r" "" >&2
+}
+
+confirm_install() {
+    printf "%s " "$1" >&2
+    read -r answer < /dev/tty || answer="y"
+    case "$answer" in
+        [nN]*) echo "Aborted." >&2; exit 0 ;;
+    esac
+}
+
+check_socket_access() {
+    if [ ! -w "/run/juju-installer.socket" ]; then
+        echo "Unable to trigger the installation of Juju." >&2
+        echo "Please make sure you're a member of the 'lxd' system group." >&2
+        echo "Run: sudo adduser \$USER lxd && newgrp lxd" >&2
+        exit 1
+    fi
+}
+
+trigger_service() {
+    show_progress "[1/5] Installing Juju snap..."
+    python3 -c 'import socket; s=socket.socket(socket.AF_UNIX); s.connect("/run/juju-installer.socket"); s.send(b"i"); s.recv(1)'
+}
+
+wait_for_snap() {
+    i=0
+    while [ "$i" -lt 90 ]; do
+        sleep 1
+        [ -x "${SNAP_BIN}" ] && return 0
+        i=$((i + 1))
+    done
+    clear_progress
+    echo "ERROR: Juju snap installation timed out." >&2
+    exit 1
+}
+
+has_controller() {
+    "${SNAP_BIN}" controllers --format json 2>/dev/null | grep -q '"lxd"'
+}
+
+has_model() {
+    "${SNAP_BIN}" models --format json 2>/dev/null | grep -q '"welcome"'
+}
+
+do_bootstrap() {
+    if ! has_controller; then
+        show_progress "[4/5] Bootstrapping Juju controller (this may take a few minutes)..."
+        if ! timeout 600 "${SNAP_BIN}" bootstrap lxd lxd >/dev/null 2>&1; then
+            clear_progress
+            echo "ERROR: Juju bootstrap failed or timed out. Re-run the command to retry." >&2
+            exit 1
+        fi
+    fi
+
+    if ! has_model; then
+        show_progress "[5/5] Creating welcome model..."
+        if ! timeout 60 "${SNAP_BIN}" add-model welcome >/dev/null 2>&1; then
+            clear_progress
+            echo "ERROR: Failed to create welcome model. Re-run the command to retry." >&2
+            exit 1
+        fi
+    fi
+
+    clear_progress
+}
+
+is_deploy_command() {
+    [ "${1:-}" = "deploy" ]
+}
+
+# --- Main logic ---
+
+if [ ! -x "${SNAP_BIN}" ]; then
+    # Snap not installed — need to trigger service
+    check_socket_access
+
+    if is_deploy_command "$@"; then
+        confirm_install "Would you like to install Juju snaps now (Y/n)?"
+    else
+        confirm_install "Would you like to install Juju snap now (Y/n)?"
+    fi
+
+    trigger_service
+    wait_for_snap
+
+    if is_deploy_command "$@"; then
+        do_bootstrap
+    fi
+elif is_deploy_command "$@"; then
+    # Snap installed but maybe no controller yet
+    if ! has_controller || ! has_model; then
+        do_bootstrap
+    fi
+fi
+
+exec "${SNAP_BIN}" "$@"
