@@ -29,8 +29,8 @@ check_socket_access() {
 }
 
 trigger_service() {
-    show_progress "[1/5] Installing Juju snap..."
-    python3 -c 'import socket; s=socket.socket(socket.AF_UNIX); s.connect("/run/juju-installer.socket"); s.send(b"i"); s.recv(1)'
+    show_progress "[1/5] Preparing Juju environment..."
+    python3 -c 'import socket; s=socket.socket(socket.AF_UNIX); s.connect("/run/juju-installer.socket"); s.send(b"i"); s.recv(1)' >/dev/null
 }
 
 wait_for_snap() {
