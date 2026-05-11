@@ -1,0 +1,39 @@
+#!/bin/sh
+set -eu
+
+# Read mode byte from wrapper (i=install only, b=install+bootstrap-prep)
+# Currently both modes are identical on the service side.
+# Bootstrap runs in the wrapper as the calling user.
+# shellcheck disable=SC2034
+MODE=$(head -c1)
+
+# Step 1: Install Juju snap if not present
+if [ ! -x /snap/bin/juju ]; then
+    echo "[1/3] Installing Juju snap..."
+    snap install juju 1>&2
+fi
+
+# Step 2: Ensure LXD snap is available
+if [ ! -x /snap/bin/lxd ]; then
+    echo "[2/3] Installing LXD..."
+    python3 -c 'import socket; s=socket.socket(socket.AF_UNIX); s.connect("/run/lxd-installer.socket"); s.send(b"x"); s.recv(1)' 1>&2
+    i=0
+    while [ "$i" -lt 90 ]; do
+        sleep 1
+        [ -x /snap/bin/lxd ] && break
+        i=$((i + 1))
+    done
+    if [ ! -x /snap/bin/lxd ]; then
+        echo "ERROR: LXD snap installation timed out." 1>&2
+        exit 1
+    fi
+fi
+
+# Step 3: Initialize LXD if needed
+if ! /snap/bin/lxc storage list --format csv 2>/dev/null | grep -q default; then
+    echo "[3/3] Initializing LXD..."
+    /snap/bin/lxd init --auto 1>&2
+fi
+
+# Signal completion
+echo 1
