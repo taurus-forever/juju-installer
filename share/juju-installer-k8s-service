@@ -24,14 +24,20 @@ if ! /snap/bin/k8s status >/dev/null 2>&1; then
 fi
 
 # Step 4: Wait for K8s to be ready
-echo "[4/5] Waiting for Canonical K8s to be ready..." 1>&2
-/snap/bin/k8s status --wait-ready 1>&2
+echo "[4/6] Waiting for Canonical K8s to be ready..." 1>&2
+/snap/bin/k8s status --wait-ready --timeout 300 1>&2
 
 # Step 5: Enable local storage if not already enabled
 if ! /snap/bin/k8s status 2>/dev/null | grep -q "local-storage.*enabled"; then
-    echo "[5/5] Enabling local storage..." 1>&2
+    echo "[5/6] Enabling local storage..." 1>&2
     /snap/bin/k8s enable local-storage 1>&2
 fi
+
+# Step 6: Export kubeconfig for the calling user
+echo "[6/6] Exporting kubeconfig..." 1>&2
+/snap/bin/k8s config > /run/juju-installer-k8s-kubeconfig
+chmod 0640 /run/juju-installer-k8s-kubeconfig
+chgrp lxd /run/juju-installer-k8s-kubeconfig
 
 # Signal completion
 echo 1

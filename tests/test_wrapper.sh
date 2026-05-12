@@ -427,11 +427,11 @@ test_k8s_progress_step_count() {
     patch_wrapper
     run_patched deploy postgresql-k8s
     result=0
-    assert_stderr_contains "\[1/8\]" || result=1
+    assert_stderr_contains "\[1/9\]" || result=1
     teardown
     return $result
 }
-test_k8s_progress_step_count; report "K8s path shows [1/8]" $?
+test_k8s_progress_step_count; report "K8s path shows [1/9]" $?
 
 # ============================================================
 # Summary

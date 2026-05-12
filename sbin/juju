@@ -149,8 +149,10 @@ do_bootstrap_lxd() {
 }
 
 do_bootstrap_k8s() {
+    export KUBECONFIG="/run/juju-installer-k8s-kubeconfig"
+
     if ! has_k8s_cloud; then
-        show_progress "[6/8] Registering Canonical K8s cloud..."
+        show_progress "[7/9] Registering Canonical K8s cloud..."
         if ! timeout 60 "${SNAP_BIN}" add-k8s ck8s --client >/dev/null 2>&1; then
             clear_progress
             echo "ERROR: Failed to register K8s cloud. Re-run the command to retry." >&2
@@ -159,7 +161,7 @@ do_bootstrap_k8s() {
     fi
 
     if ! has_k8s_controller; then
-        show_progress "[7/8] Bootstrapping Juju controller (this may take a few minutes)..."
+        show_progress "[8/9] Bootstrapping Juju controller (this may take a few minutes)..."
         if ! timeout 600 "${SNAP_BIN}" bootstrap ck8s >/dev/null 2>&1; then
             clear_progress
             echo "ERROR: Juju bootstrap on K8s failed or timed out. Re-run the command to retry." >&2
@@ -168,7 +170,7 @@ do_bootstrap_k8s() {
     fi
 
     if ! has_model; then
-        show_progress "[8/8] Creating welcome model..."
+        show_progress "[9/9] Creating welcome model..."
         if ! timeout 60 "${SNAP_BIN}" add-model welcome >/dev/null 2>&1; then
             clear_progress
             echo "ERROR: Failed to create welcome model. Re-run the command to retry." >&2
@@ -176,6 +178,7 @@ do_bootstrap_k8s() {
         fi
     fi
 
+    unset KUBECONFIG
     clear_progress
     BOOTSTRAPPED=1
 }
@@ -194,7 +197,7 @@ if [ ! -x "${SNAP_BIN}" ]; then
 
         if [ "$substrate" = "k8s" ]; then
             confirm_install "Would you like to install Juju and Canonical K8s snaps now (Y/n)?"
-            show_progress "[1/8] Preparing Juju environment (this may take a few minutes)..."
+            show_progress "[1/9] Preparing Juju environment (this may take a few minutes)..."
             trigger_k8s_service
             wait_for_snap
             do_bootstrap_k8s
