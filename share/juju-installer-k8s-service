@@ -1,0 +1,37 @@
+#!/bin/sh
+set -eu
+
+# Read mode byte from wrapper
+# shellcheck disable=SC2034
+MODE=$(head -c1)
+
+# Step 1: Install Juju snap if not present
+if [ ! -x /snap/bin/juju ]; then
+    echo "[1/5] Installing Juju snap..." 1>&2
+    snap install juju 1>&2
+fi
+
+# Step 2: Install Canonical K8s snap if not present
+if [ ! -x /snap/bin/k8s ]; then
+    echo "[2/5] Installing Canonical K8s..." 1>&2
+    snap install k8s --classic 1>&2
+fi
+
+# Step 3: Bootstrap Canonical K8s if not already bootstrapped
+if ! /snap/bin/k8s status >/dev/null 2>&1; then
+    echo "[3/5] Bootstrapping Canonical K8s..." 1>&2
+    /snap/bin/k8s bootstrap 1>&2
+fi
+
+# Step 4: Wait for K8s to be ready
+echo "[4/5] Waiting for Canonical K8s to be ready..." 1>&2
+/snap/bin/k8s status --wait-ready 1>&2
+
+# Step 5: Enable local storage if not already enabled
+if ! /snap/bin/k8s status 2>/dev/null | grep -q "local-storage.*enabled"; then
+    echo "[5/5] Enabling local storage..." 1>&2
+    /snap/bin/k8s enable local-storage 1>&2
+fi
+
+# Signal completion
+echo 1

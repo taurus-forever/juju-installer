@@ -1,0 +1,13 @@
+[Unit]
+Description=Helper to install Juju and bootstrap Canonical K8s on demand
+
+[Socket]
+ListenStream=/run/juju-installer-k8s.socket
+SocketUser=root
+SocketGroup=lxd
+SocketMode=0660
+Accept=true
+MaxConnections=1
+
+[Install]
+WantedBy=multi-user.target

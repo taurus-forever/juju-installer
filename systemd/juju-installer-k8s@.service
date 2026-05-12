@@ -1,0 +1,12 @@
+[Unit]
+Description=Helper to install Juju and bootstrap Canonical K8s on demand
+
+[Service]
+ExecStart=/bin/sh -eu /usr/share/juju-installer/juju-installer-k8s-service
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+Restart=no
+TimeoutStartSec=900
+ProtectHome=yes
+PrivateTmp=yes
