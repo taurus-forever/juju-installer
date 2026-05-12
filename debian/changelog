@@ -1,3 +1,12 @@
+juju-installer (0.0.2) noble; urgency=medium
+
+  * Add timing hint to step 1/5 progress message.
+  * Show 'juju status' hint after successful deploy with bootstrap.
+  * Fix: use id -un instead of $USER in error message.
+  * Fix: redirect service progress to stderr, fix wrapper recv protocol.
+
+ -- Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>  Mon, 12 May 2026 01:00:00 +0000
+
 juju-installer (0.0.1) noble; urgency=medium
 
   * Initial release.
