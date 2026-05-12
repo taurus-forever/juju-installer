@@ -149,7 +149,10 @@ do_bootstrap_lxd() {
 }
 
 do_bootstrap_k8s() {
-    export KUBECONFIG="/run/juju-installer-k8s-kubeconfig"
+    # Copy kubeconfig to user's home (Juju snap can't read /run/)
+    mkdir -p "${HOME}/.kube"
+    cp /run/juju-installer-k8s-kubeconfig "${HOME}/.kube/config"
+    chmod 600 "${HOME}/.kube/config"
 
     if ! has_k8s_cloud; then
         show_progress "[7/9] Registering Canonical K8s cloud..."
@@ -178,7 +181,6 @@ do_bootstrap_k8s() {
         fi
     fi
 
-    unset KUBECONFIG
     clear_progress
     BOOTSTRAPPED=1
 }
