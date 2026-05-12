@@ -8,5 +8,4 @@ StandardOutput=socket
 StandardError=journal
 Restart=no
 TimeoutStartSec=900
-ProtectHome=yes
 PrivateTmp=yes
