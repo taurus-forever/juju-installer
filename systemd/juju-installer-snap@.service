@@ -1,0 +1,12 @@
+[Unit]
+Description=Helper to install Juju snap on demand
+
+[Service]
+ExecStart=/bin/sh -eu /usr/share/juju-installer/juju-installer-snap-service
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+Restart=no
+TimeoutStartSec=300
+ProtectHome=yes
+PrivateTmp=yes
