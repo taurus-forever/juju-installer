@@ -54,9 +54,14 @@ extract_charm_name() {
             skip_next=0; continue
         fi
         case "$arg" in
-            --*=*) continue ;;
-            -*)  skip_next=1; continue ;;
-            *)   echo "$arg"; return ;;
+            --*=*)     continue ;;
+            --channel|--base|--config|--constraints|--map-machines| \
+            --num-units|--resource|--series|--storage|--to|--revision| \
+            --bind|--attach-storage)
+                       skip_next=1; continue ;;
+            --*)       continue ;;
+            -?)        skip_next=1; continue ;;
+            *)         echo "$arg"; return ;;
         esac
     done
 }
@@ -68,8 +73,17 @@ detect_substrate() {
     esac
 }
 
+find_subcommand() {
+    for arg in "$@"; do
+        case "$arg" in
+            -*) continue ;;
+            *)  echo "$arg"; return ;;
+        esac
+    done
+}
+
 is_deploy_command() {
-    [ "${1:-}" = "deploy" ]
+    [ "$(find_subcommand "$@")" = "deploy" ]
 }
 
 # --- Service triggers ---
@@ -149,8 +163,16 @@ do_bootstrap_lxd() {
 }
 
 do_bootstrap_k8s() {
-    # Copy kubeconfig to user's home (Juju snap can't read /run/)
+    if [ ! -f /run/juju-installer-k8s-kubeconfig ]; then
+        echo "ERROR: K8s kubeconfig not found. The K8s service may have failed." >&2
+        echo "Check: journalctl -u juju-installer-k8s@\\*" >&2
+        exit 1
+    fi
+
     mkdir -p "${HOME}/.kube"
+    if [ -f "${HOME}/.kube/config" ]; then
+        cp "${HOME}/.kube/config" "${HOME}/.kube/config.bak"
+    fi
     cp /run/juju-installer-k8s-kubeconfig "${HOME}/.kube/config"
     chmod 600 "${HOME}/.kube/config"
 

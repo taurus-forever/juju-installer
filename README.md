@@ -2,15 +2,16 @@
 
 A lightweight Debian package that enables a one-command Juju experience on Ubuntu.
 
-Instead of manually installing snaps, initializing LXD, bootstrapping controllers, and creating models, users can simply run:
+Instead of manually installing snaps, initializing substrates, bootstrapping controllers, and creating models, users can simply run:
 
 ```bash
-juju deploy postgresql
+juju deploy postgresql              # LXD substrate
+juju deploy postgresql-k8s --trust  # Canonical K8s substrate
 ```
 
 On a fresh Ubuntu 24.04+ system, `juju-installer` handles everything automatically:
-installing the Juju and LXD snaps, initializing LXD, bootstrapping a Juju controller,
-creating a model, and executing the deploy.
+installing the required snaps, initializing the substrate (LXD or Canonical K8s),
+bootstrapping a Juju controller, creating a model, and executing the deploy.
 
 ## How It Works
 
@@ -18,17 +19,19 @@ creating a model, and executing the deploy.
 [`lxd-installer`](https://launchpad.net/ubuntu/+source/lxd-installer) package:
 
 1. A thin wrapper script at `/sbin/juju` intercepts `juju` commands
-2. If the Juju snap is not installed, it triggers installation via a systemd
-   socket-activated service (no `sudo` required)
-3. For `juju deploy` commands, the wrapper also bootstraps LXD and the Juju
-   controller as the calling user
-4. Once setup is complete, the wrapper passes through to the real
+2. If the Juju snap is not installed, it detects the target substrate from the
+   charm name (`-k8s` suffix → Canonical K8s, otherwise → LXD)
+3. It triggers the appropriate systemd socket-activated service (no `sudo` required):
+   snap-only, LXD, or K8s
+4. For `juju deploy` commands, the wrapper also bootstraps the Juju controller
+   as the calling user
+5. Once setup is complete, the wrapper passes through to the real
    `/snap/bin/juju` with zero overhead
 
 ### Privilege Split
 
-- **Root operations** (via systemd socket): `snap install juju`, `snap install lxd`, `lxd init --auto`
-- **User operations** (in the wrapper): `juju bootstrap lxd lxd`, `juju add-model welcome`
+- **Root operations** (via systemd socket): `snap install juju`, `snap install lxd`, `lxd init --auto`, `snap install k8s`, `k8s bootstrap`, `k8s enable local-storage`
+- **User operations** (in the wrapper): `juju bootstrap`, `juju add-k8s`, `juju add-model welcome`
 
 No user-controlled data crosses the privilege boundary. The socket is a trigger,
 not a command channel.
@@ -57,8 +60,11 @@ sudo apt install ../juju-installer_*.deb
 ## Usage
 
 ```bash
-# Deploy a charm (triggers full setup on first run)
+# Deploy a VM charm (triggers LXD setup on first run)
 juju deploy postgresql
+
+# Deploy a K8s charm (triggers Canonical K8s setup on first run)
+juju deploy postgresql-k8s --trust
 
 # Run any juju command (triggers snap install only)
 juju version
@@ -68,21 +74,29 @@ juju help
 ## Package Contents
 
 ```
-/sbin/juju                                        # wrapper script
-/usr/lib/systemd/system/juju-installer.socket      # systemd socket unit
-/usr/lib/systemd/system/juju-installer@.service     # systemd service unit
-/usr/share/juju-installer/juju-installer-service    # install/bootstrap logic
+/sbin/juju                                                  # wrapper script
+/usr/lib/systemd/system/juju-installer-snap.socket          # snap-only socket
+/usr/lib/systemd/system/juju-installer-snap@.service        # snap-only service
+/usr/lib/systemd/system/juju-installer-lxd.socket           # LXD socket
+/usr/lib/systemd/system/juju-installer-lxd@.service         # LXD service
+/usr/lib/systemd/system/juju-installer-k8s.socket           # K8s socket
+/usr/lib/systemd/system/juju-installer-k8s@.service         # K8s service
+/usr/share/juju-installer/juju-installer-snap-service       # snap install logic
+/usr/share/juju-installer/juju-installer-lxd-service        # LXD install/init logic
+/usr/share/juju-installer/juju-installer-k8s-service        # K8s install/bootstrap logic
 ```
 
 ## Design
 
 See [docs/specs/2026-05-11-juju-installer-design.md](docs/specs/2026-05-11-juju-installer-design.md)
-for the full design document.
+for the PoC1 (LXD support) design and [docs/specs/2026-05-12-poc2-k8s-support-design.md](docs/specs/2026-05-12-poc2-k8s-support-design.md)
+for the PoC2 (K8s support) design.
 
 ## Future Work
 
 - Dedicated `juju` system group (instead of reusing `lxd`)
-- Canonical K8s support (`juju deploy postgresql-k8s --trust`)
+- Charmhub API detection (query charm metadata instead of name suffix)
+- Re-bootstrap after snap already installed
 - Configurable snap channels
 - CI/CD via GitHub Actions
 

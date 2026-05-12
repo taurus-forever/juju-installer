@@ -1,3 +1,13 @@
+juju-installer (0.1.2) noble; urgency=medium
+
+  * Fix: --trust and other boolean flags no longer misidentify the charm name.
+  * Fix: global flags before 'deploy' (e.g. juju --verbose deploy) now detected.
+  * Fix: explicit whitelist of juju deploy value-flags for charm name extraction.
+  * Fix: validate kubeconfig exists before copying; back up existing ~/.kube/config.
+  * Update README.md and design spec to match PoC2 implementation.
+
+ -- Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>  Mon, 12 May 2026 20:00:00 +0000
+
 juju-installer (0.1.1) noble; urgency=medium
 
   * Fix: remove ProtectHome from K8s service (k8s snap needs /root/snap).

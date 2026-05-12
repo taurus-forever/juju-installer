@@ -120,16 +120,22 @@ The wrapper extends PoC1 with substrate detection and per-substrate bootstrap lo
 
 ```sh
 extract_charm_name() {
+    shift
+    skip_next=0
     for arg in "$@"; do
+        if [ "$skip_next" -eq 1 ]; then
+            skip_next=0; continue
+        fi
         case "$arg" in
-            -*) continue ;;
-            *)  echo "$arg"; return ;;
+            --*=*) continue ;;
+            -*)  skip_next=1; continue ;;
+            *)   echo "$arg"; return ;;
         esac
     done
 }
 ```
 
-Called as `charm_name=$(extract_charm_name "$@")` where `$@` is the arguments after `deploy`. This skips flags (starting with `-`) and returns the first positional argument.
+Called as `charm_name=$(extract_charm_name "$@")` where `$@` includes `deploy` as the first argument (shifted off). This handles `--flag=value` (skip one arg) and `--flag value` / `-f value` (skip two args) to find the first positional argument — the charm name.
 
 **Confirmation prompts (substrate-aware):**
 - LXD deploy: `"Would you like to install Juju and LXD snaps now (Y/n)?"`
@@ -165,24 +171,26 @@ s.connect("/run/juju-installer-k8s.socket"); s.send(b"i"); s.recv(1)
 
 After the K8s service completes and `/snap/bin/juju` is available, the wrapper performs user-level K8s setup:
 
-1. **Register K8s cloud** — `timeout 60 /snap/bin/juju add-k8s ck8s --client`. Skip if cloud `ck8s` already exists. Detection: `/snap/bin/juju clouds --format json 2>/dev/null | grep -q '"ck8s"'`.
-2. **Bootstrap Juju controller** — `timeout 600 /snap/bin/juju bootstrap ck8s`. Skip if controller `ck8s` already exists. Detection: `/snap/bin/juju controllers --format json 2>/dev/null | grep -q '"ck8s"'`.
-3. **Create welcome model** — `timeout 60 /snap/bin/juju add-model welcome`. Skip if model `welcome` already exists.
+1. **Copy kubeconfig** — copies `/run/juju-installer-k8s-kubeconfig` to `~/.kube/config` (chmod 600). The Juju snap can't read arbitrary `/run/` files due to confinement, so the kubeconfig must be in the user's home directory.
+2. **Register K8s cloud** — `timeout 60 /snap/bin/juju add-k8s ck8s --client`. Skip if cloud `ck8s` already exists. Detection: `/snap/bin/juju clouds --format json 2>/dev/null | grep -q '"ck8s"'`.
+3. **Bootstrap Juju controller** — `timeout 600 /snap/bin/juju bootstrap ck8s`. Skip if controller `ck8s` already exists. Detection: `/snap/bin/juju controllers --format json 2>/dev/null | grep -q '"ck8s"'`.
+4. **Create welcome model** — `timeout 60 /snap/bin/juju add-model welcome`. Skip if model `welcome` already exists.
 
-**Progress (K8s path, 8 steps total):**
+**Progress (K8s path, 9 steps total):**
 ```
-\r[1/8] Preparing Juju environment (this may take a few minutes)...
-\r[2/8] Installing Canonical K8s...
-\r[3/8] Bootstrapping Canonical K8s...
-\r[4/8] Waiting for Canonical K8s to be ready...
-\r[5/8] Enabling local storage...
-\r[6/8] Registering Canonical K8s cloud...
-\r[7/8] Bootstrapping Juju controller (this may take a few minutes)...
-\r[8/8] Creating welcome model...
+\r[1/9] Preparing Juju environment (this may take a few minutes)...
+\r[2/9] Installing Canonical K8s...
+\r[3/9] Bootstrapping Canonical K8s...
+\r[4/9] Waiting for Canonical K8s to be ready...
+\r[5/9] Enabling local storage...
+\r[6/9] Exporting kubeconfig...
+\r[7/9] Registering Canonical K8s cloud...
+\r[8/9] Bootstrapping Juju controller (this may take a few minutes)...
+\r[9/9] Creating welcome model...
 Hint: run 'juju status' to track deployment progress.
 ```
 
-Steps 1-5 come from the K8s service (progress to stderr/journal, not displayed in wrapper). The wrapper displays its own steps 6-8 using the `\r` overwriting pattern. The step 1 message is shown by the wrapper while waiting for the service to complete.
+Steps 1-6 come from the K8s service (progress to stderr/journal, not displayed in wrapper). The wrapper displays its own steps 7-9 using the `\r` overwriting pattern. The step 1 message is shown by the wrapper while waiting for the service to complete.
 
 **Progress (LXD path, 5 steps total — unchanged from PoC1):**
 ```
@@ -269,33 +277,49 @@ MODE=$(head -c1)
 
 # Step 1: Install Juju snap
 if [ ! -x /snap/bin/juju ]; then
-    echo "[1/5] Installing Juju snap..." 1>&2
+    echo "[1/6] Installing Juju snap..." 1>&2
     snap install juju 1>&2
 fi
 
 # Step 2: Install Canonical K8s snap
 if [ ! -x /snap/bin/k8s ]; then
-    echo "[2/5] Installing Canonical K8s..." 1>&2
+    echo "[2/6] Installing Canonical K8s..." 1>&2
     snap install k8s --classic 1>&2
 fi
 
 # Step 3: Bootstrap Canonical K8s
 # Detection: k8s status exits non-zero or reports not-ready when unbootstrapped
 if ! /snap/bin/k8s status >/dev/null 2>&1; then
-    echo "[3/5] Bootstrapping Canonical K8s..." 1>&2
+    echo "[3/6] Bootstrapping Canonical K8s..." 1>&2
     /snap/bin/k8s bootstrap 1>&2
 fi
 
-# Step 4: Wait for K8s to be ready
-echo "[4/5] Waiting for Canonical K8s to be ready..." 1>&2
-/snap/bin/k8s status --wait-ready 1>&2
+# Step 4: Wait for K8s to be ready (retry up to 5 minutes)
+echo "[4/6] Waiting for Canonical K8s to be ready..." 1>&2
+i=0
+while [ "$i" -lt 60 ]; do
+    if /snap/bin/k8s status --wait-ready --timeout 5 >/dev/null 2>&1; then
+        break
+    fi
+    sleep 5
+    i=$((i + 1))
+done
+if ! /snap/bin/k8s status 2>/dev/null | grep -q "cluster status:.*ready"; then
+    echo "ERROR: Canonical K8s did not become ready." 1>&2
+    exit 1
+fi
 
 # Step 5: Enable local storage
-# Detection: exact pattern to be validated during implementation against k8s status output
 if ! /snap/bin/k8s status 2>/dev/null | grep -q "local-storage.*enabled"; then
-    echo "[5/5] Enabling local storage..." 1>&2
+    echo "[5/6] Enabling local storage..." 1>&2
     /snap/bin/k8s enable local-storage 1>&2
 fi
+
+# Step 6: Export kubeconfig for the calling user
+echo "[6/6] Exporting kubeconfig..." 1>&2
+/snap/bin/k8s config > /run/juju-installer-k8s-kubeconfig
+chmod 0640 /run/juju-installer-k8s-kubeconfig
+chgrp lxd /run/juju-installer-k8s-kubeconfig
 
 echo 1
 ```
@@ -399,11 +423,10 @@ StandardOutput=socket
 StandardError=journal
 Restart=no
 TimeoutStartSec=900
-ProtectHome=yes
 PrivateTmp=yes
 ```
 
-K8s service gets `TimeoutStartSec=900` (15 minutes) because `k8s bootstrap` + `k8s status --wait-ready` can take longer than LXD setup.
+K8s service gets `TimeoutStartSec=900` (15 minutes) because `k8s bootstrap` + `k8s status --wait-ready` can take longer than LXD setup. No `ProtectHome=yes` — the k8s snap needs write access to `/root/snap/k8s/` during bootstrap.
 
 ### Socket Ownership
 

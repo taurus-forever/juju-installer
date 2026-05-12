@@ -227,6 +227,45 @@ test_extract_plain_charm() {
 }
 test_extract_plain_charm; report "plain charm name extracted" $?
 
+test_extract_trust_before_charm() {
+    setup
+    make_sockets_writable
+    patch_wrapper
+    run_patched deploy --trust postgresql-k8s
+    result=0
+    assert_stderr_contains "Canonical K8s snaps" || result=1
+    teardown
+    return $result
+}
+test_extract_trust_before_charm; report "--trust before charm name handled" $?
+
+test_extract_trust_after_charm() {
+    setup
+    make_sockets_writable
+    patch_wrapper
+    run_patched deploy postgresql-k8s --trust
+    result=0
+    assert_stderr_contains "Canonical K8s snaps" || result=1
+    teardown
+    return $result
+}
+test_extract_trust_after_charm; report "--trust after charm name handled" $?
+
+echo ""
+echo "=== Global flags before subcommand ==="
+
+test_global_flag_before_deploy() {
+    setup
+    make_sockets_writable
+    patch_wrapper
+    run_patched --verbose deploy postgresql
+    result=0
+    assert_stderr_contains "LXD snaps" || result=1
+    teardown
+    return $result
+}
+test_global_flag_before_deploy; report "--verbose deploy triggers install" $?
+
 echo ""
 echo "=== Non-deploy commands ==="
 
