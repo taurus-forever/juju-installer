@@ -19,15 +19,6 @@ confirm_install() {
     esac
 }
 
-check_socket_access() {
-    if [ ! -w "/run/juju-installer.socket" ]; then
-        echo "Unable to trigger the installation of Juju." >&2
-        echo "Please make sure you're a member of the 'lxd' system group." >&2
-        echo "Run: sudo adduser $(id -un) lxd && newgrp lxd" >&2
-        exit 1
-    fi
-}
-
 check_user() {
     if [ "$(id -u)" -eq 0 ]; then
         echo "ERROR: Do not run 'juju deploy' as root." >&2
@@ -44,9 +35,64 @@ check_user() {
     fi
 }
 
-trigger_service() {
-    show_progress "[1/5] Preparing Juju environment (this may take a few minutes)..."
-    python3 -c 'import socket; s=socket.socket(socket.AF_UNIX); s.connect("/run/juju-installer.socket"); s.send(b"i"); s.recv(1)' >/dev/null
+check_socket_access() {
+    if [ ! -w "/run/juju-installer-snap.socket" ]; then
+        echo "Unable to trigger the installation of Juju." >&2
+        echo "Please make sure you're a member of the 'lxd' system group." >&2
+        echo "Run: sudo adduser $(id -un) lxd && newgrp lxd" >&2
+        exit 1
+    fi
+}
+
+# --- Substrate detection ---
+
+extract_charm_name() {
+    shift
+    skip_next=0
+    for arg in "$@"; do
+        if [ "$skip_next" -eq 1 ]; then
+            skip_next=0; continue
+        fi
+        case "$arg" in
+            --*=*) continue ;;
+            -*)  skip_next=1; continue ;;
+            *)   echo "$arg"; return ;;
+        esac
+    done
+}
+
+detect_substrate() {
+    case "$1" in
+        *-k8s) echo "k8s" ;;
+        *)     echo "lxd" ;;
+    esac
+}
+
+is_deploy_command() {
+    [ "${1:-}" = "deploy" ]
+}
+
+# --- Service triggers ---
+
+trigger_snap_service() {
+    python3 -c '
+import socket; s=socket.socket(socket.AF_UNIX)
+s.connect("/run/juju-installer-snap.socket"); s.send(b"i"); s.recv(1)
+' >/dev/null
+}
+
+trigger_lxd_service() {
+    python3 -c '
+import socket; s=socket.socket(socket.AF_UNIX)
+s.connect("/run/juju-installer-lxd.socket"); s.send(b"i"); s.recv(1)
+' >/dev/null
+}
+
+trigger_k8s_service() {
+    python3 -c '
+import socket; s=socket.socket(socket.AF_UNIX)
+s.connect("/run/juju-installer-k8s.socket"); s.send(b"i"); s.recv(1)
+' >/dev/null
 }
 
 wait_for_snap() {
@@ -61,16 +107,26 @@ wait_for_snap() {
     exit 1
 }
 
-has_controller() {
+# --- Bootstrap functions ---
+
+has_lxd_controller() {
     "${SNAP_BIN}" controllers --format json 2>/dev/null | grep -q '"lxd"'
+}
+
+has_k8s_cloud() {
+    "${SNAP_BIN}" clouds --format json 2>/dev/null | grep -q '"ck8s"'
+}
+
+has_k8s_controller() {
+    "${SNAP_BIN}" controllers --format json 2>/dev/null | grep -q '"ck8s"'
 }
 
 has_model() {
     "${SNAP_BIN}" models --format json 2>/dev/null | grep -q '"welcome"'
 }
 
-do_bootstrap() {
-    if ! has_controller; then
+do_bootstrap_lxd() {
+    if ! has_lxd_controller; then
         show_progress "[4/5] Bootstrapping Juju controller (this may take a few minutes)..."
         if ! timeout 600 "${SNAP_BIN}" bootstrap lxd lxd >/dev/null 2>&1; then
             clear_progress
@@ -92,8 +148,36 @@ do_bootstrap() {
     BOOTSTRAPPED=1
 }
 
-is_deploy_command() {
-    [ "${1:-}" = "deploy" ]
+do_bootstrap_k8s() {
+    if ! has_k8s_cloud; then
+        show_progress "[6/8] Registering Canonical K8s cloud..."
+        if ! timeout 60 "${SNAP_BIN}" add-k8s ck8s --client >/dev/null 2>&1; then
+            clear_progress
+            echo "ERROR: Failed to register K8s cloud. Re-run the command to retry." >&2
+            exit 1
+        fi
+    fi
+
+    if ! has_k8s_controller; then
+        show_progress "[7/8] Bootstrapping Juju controller (this may take a few minutes)..."
+        if ! timeout 600 "${SNAP_BIN}" bootstrap ck8s >/dev/null 2>&1; then
+            clear_progress
+            echo "ERROR: Juju bootstrap on K8s failed or timed out. Re-run the command to retry." >&2
+            exit 1
+        fi
+    fi
+
+    if ! has_model; then
+        show_progress "[8/8] Creating welcome model..."
+        if ! timeout 60 "${SNAP_BIN}" add-model welcome >/dev/null 2>&1; then
+            clear_progress
+            echo "ERROR: Failed to create welcome model. Re-run the command to retry." >&2
+            exit 1
+        fi
+    fi
+
+    clear_progress
+    BOOTSTRAPPED=1
 }
 
 BOOTSTRAPPED=0
@@ -101,27 +185,30 @@ BOOTSTRAPPED=0
 # --- Main logic ---
 
 if [ ! -x "${SNAP_BIN}" ]; then
-    # Snap not installed — need to trigger service
     check_user
     check_socket_access
 
     if is_deploy_command "$@"; then
-        confirm_install "Would you like to install Juju snaps now (Y/n)?"
+        charm_name=$(extract_charm_name "$@")
+        substrate=$(detect_substrate "${charm_name:-}")
+
+        if [ "$substrate" = "k8s" ]; then
+            confirm_install "Would you like to install Juju and Canonical K8s snaps now (Y/n)?"
+            show_progress "[1/8] Preparing Juju environment (this may take a few minutes)..."
+            trigger_k8s_service
+            wait_for_snap
+            do_bootstrap_k8s
+        else
+            confirm_install "Would you like to install Juju and LXD snaps now (Y/n)?"
+            show_progress "[1/5] Preparing Juju environment (this may take a few minutes)..."
+            trigger_lxd_service
+            wait_for_snap
+            do_bootstrap_lxd
+        fi
     else
         confirm_install "Would you like to install Juju snap now (Y/n)?"
-    fi
-
-    trigger_service
-    wait_for_snap
-
-    if is_deploy_command "$@"; then
-        do_bootstrap
-    fi
-elif is_deploy_command "$@"; then
-    # Snap installed but maybe no controller yet
-    if ! has_controller || ! has_model; then
-        check_user
-        do_bootstrap
+        trigger_snap_service
+        wait_for_snap
     fi
 fi
 
