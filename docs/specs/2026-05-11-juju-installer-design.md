@@ -100,6 +100,8 @@ Future (PoC2): create a dedicated `juju` system group (if necessary).
 
 The wrapper is the user-facing entry point. Before any installation or bootstrap operation, the wrapper performs two pre-flight checks:
 
+**Root user check:** The juju snap stores configuration in `~/.local/share/juju`. Due to snap confinement, this path is not accessible when running as root (`/root/.local` is outside the snap's `personal-files` scope). The wrapper detects `id -u == 0` and exits with a clear error directing the user to run as a regular user instead.
+
 **Cgroup check (snap confinement guard):** Snapd enforces that snap commands run within a recognized cgroup context (user login session, snap service, etc.). When a user enters a system via non-login methods — `su`, `sudo -i`, or `lxc exec --user` into an LXD VM — the process inherits a system service cgroup (e.g., `/system.slice/lxd-agent.service` or `/user.slice/.../session-XX.scope` under a foreign service). Snapd's `snap-confine` rejects snap execution from these cgroups with a cryptic error like `"/system.slice/lxd-agent.service is not a snap cgroup for tag snap.juju.juju"`. This affects all strictly-confined snaps — LXD's own `lxc` command only avoids this because the `lxd-support` super-privileged interface bypasses cgroup validation entirely. The wrapper detects this condition by checking `/proc/self/cgroup` for system service cgroup patterns and exits early with a human-readable message:
 ```
 WARNING: This shell is not running in a regular login session.

@@ -1,3 +1,11 @@
+juju-installer (0.0.4) noble; urgency=medium
+
+  * Add root user check: prevent running juju deploy as root (snap confinement
+    blocks access to /root/.local).
+  * Update design spec with root user check rationale.
+
+ -- Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>  Mon, 12 May 2026 02:30:00 +0000
+
 juju-installer (0.0.3) noble; urgency=medium
 
   * Add cgroup pre-flight check to detect non-login sessions (su/sudo/lxc exec).

@@ -28,7 +28,14 @@ check_socket_access() {
     fi
 }
 
-check_cgroup() {
+check_user() {
+    if [ "$(id -u)" -eq 0 ]; then
+        echo "ERROR: Do not run 'juju deploy' as root." >&2
+        echo "Juju stores configuration in ~/.local/share/juju which is" >&2
+        echo "not accessible to snaps under /root." >&2
+        echo "Run as a regular user instead." >&2
+        exit 1
+    fi
     if grep -q '/system\.slice/.*\.service' /proc/self/cgroup 2>/dev/null; then
         echo "WARNING: This shell is not running in a regular login session." >&2
         echo "Do not run the first 'juju deploy' under su or sudo." >&2
@@ -95,7 +102,7 @@ BOOTSTRAPPED=0
 
 if [ ! -x "${SNAP_BIN}" ]; then
     # Snap not installed — need to trigger service
-    check_cgroup
+    check_user
     check_socket_access
 
     if is_deploy_command "$@"; then
@@ -113,7 +120,7 @@ if [ ! -x "${SNAP_BIN}" ]; then
 elif is_deploy_command "$@"; then
     # Snap installed but maybe no controller yet
     if ! has_controller || ! has_model; then
-        check_cgroup
+        check_user
         do_bootstrap
     fi
 fi
