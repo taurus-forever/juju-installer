@@ -23,7 +23,7 @@ check_socket_access() {
     if [ ! -w "/run/juju-installer.socket" ]; then
         echo "Unable to trigger the installation of Juju." >&2
         echo "Please make sure you're a member of the 'lxd' system group." >&2
-        echo "Run: sudo adduser \$USER lxd && newgrp lxd" >&2
+        echo "Run: sudo adduser $(id -un) lxd && newgrp lxd" >&2
         exit 1
     fi
 }
