@@ -1,4 +1,10 @@
-sbin/juju                         sbin/
-share/juju-installer-service      usr/share/juju-installer/
-systemd/juju-installer.socket     usr/lib/systemd/system/
-systemd/juju-installer@.service   usr/lib/systemd/system/
+sbin/juju                                     sbin/
+share/juju-installer-snap-service             usr/share/juju-installer/
+share/juju-installer-lxd-service              usr/share/juju-installer/
+share/juju-installer-k8s-service              usr/share/juju-installer/
+systemd/juju-installer-snap.socket            usr/lib/systemd/system/
+systemd/juju-installer-snap@.service          usr/lib/systemd/system/
+systemd/juju-installer-lxd.socket             usr/lib/systemd/system/
+systemd/juju-installer-lxd@.service           usr/lib/systemd/system/
+systemd/juju-installer-k8s.socket             usr/lib/systemd/system/
+systemd/juju-installer-k8s@.service           usr/lib/systemd/system/

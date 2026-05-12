@@ -1,3 +1,13 @@
+juju-installer (0.1.0) noble; urgency=medium
+
+  * PoC2: Add Canonical K8s substrate support.
+  * Split monolithic service into three: snap-only, LXD, K8s.
+  * Add substrate detection from charm name suffix (-k8s).
+  * Non-deploy commands now install juju snap only (no LXD).
+  * Rewrite tests for new three-socket architecture.
+
+ -- Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>  Mon, 12 May 2026 12:00:00 +0000
+
 juju-installer (0.0.4) noble; urgency=medium
 
   * Add root user check: prevent running juju deploy as root (snap confinement
