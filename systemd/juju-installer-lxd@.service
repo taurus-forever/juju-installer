@@ -1,8 +1,8 @@
 [Unit]
-Description=Helper to install and bootstrap Juju on demand
+Description=Helper to install Juju and bootstrap LXD on demand
 
 [Service]
-ExecStart=/bin/sh -eu /usr/share/juju-installer/juju-installer-service
+ExecStart=/bin/sh -eu /usr/share/juju-installer/juju-installer-lxd-service
 StandardInput=socket
 StandardOutput=socket
 StandardError=journal

@@ -1,9 +1,7 @@
 #!/bin/sh
 set -eu
 
-# Read mode byte from wrapper (i=install only, b=install+bootstrap-prep)
-# Currently both modes are identical on the service side.
-# Bootstrap runs in the wrapper as the calling user.
+# Read mode byte from wrapper
 # shellcheck disable=SC2034
 MODE=$(head -c1)
 
