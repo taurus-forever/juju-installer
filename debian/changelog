@@ -1,3 +1,11 @@
+juju-installer (0.0.3) noble; urgency=medium
+
+  * Add cgroup pre-flight check to detect non-login sessions (su/sudo/lxc exec).
+  * Warn users to use SSH or direct login instead of su/sudo for first deploy.
+  * Update design spec with cgroup check rationale.
+
+ -- Ubuntu Developers <ubuntu-devel-discuss@lists.ubuntu.com>  Mon, 12 May 2026 02:00:00 +0000
+
 juju-installer (0.0.2) noble; urgency=medium
 
   * Add timing hint to step 1/5 progress message.

@@ -98,7 +98,17 @@ Future (PoC2): create a dedicated `juju` system group (if necessary).
 
 ### Wrapper Script (`/sbin/juju`)
 
-The wrapper is the user-facing entry point. Before any socket operation, it checks if `/run/juju-installer.socket` is writable. If not, it prints:
+The wrapper is the user-facing entry point. Before any installation or bootstrap operation, the wrapper performs two pre-flight checks:
+
+**Cgroup check (snap confinement guard):** Snapd enforces that snap commands run within a recognized cgroup context (user login session, snap service, etc.). When a user enters a system via non-login methods — `su`, `sudo -i`, or `lxc exec --user` into an LXD VM — the process inherits a system service cgroup (e.g., `/system.slice/lxd-agent.service` or `/user.slice/.../session-XX.scope` under a foreign service). Snapd's `snap-confine` rejects snap execution from these cgroups with a cryptic error like `"/system.slice/lxd-agent.service is not a snap cgroup for tag snap.juju.juju"`. This affects all strictly-confined snaps — LXD's own `lxc` command only avoids this because the `lxd-support` super-privileged interface bypasses cgroup validation entirely. The wrapper detects this condition by checking `/proc/self/cgroup` for system service cgroup patterns and exits early with a human-readable message:
+```
+WARNING: This shell is not running in a regular login session.
+Do not run the first 'juju deploy' under su or sudo.
+Use SSH or log in directly as your user instead.
+```
+This check only runs when the wrapper is about to do real work (install or bootstrap), not on pass-through. Once setup is complete, the wrapper does `exec /snap/bin/juju` transparently — at that point, any cgroup error comes from snapd itself and is outside the wrapper's control.
+
+**Socket access check:** The wrapper checks if `/run/juju-installer.socket` is writable. If not, it prints:
 ```
 Unable to trigger the installation of Juju.
 Please make sure you're a member of the 'lxd' system group.

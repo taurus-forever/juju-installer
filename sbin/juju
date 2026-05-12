@@ -28,6 +28,15 @@ check_socket_access() {
     fi
 }
 
+check_cgroup() {
+    if grep -q '/system\.slice/.*\.service' /proc/self/cgroup 2>/dev/null; then
+        echo "WARNING: This shell is not running in a regular login session." >&2
+        echo "Do not run the first 'juju deploy' under su or sudo." >&2
+        echo "Use SSH or log in directly as your user instead." >&2
+        exit 1
+    fi
+}
+
 trigger_service() {
     show_progress "[1/5] Preparing Juju environment (this may take a few minutes)..."
     python3 -c 'import socket; s=socket.socket(socket.AF_UNIX); s.connect("/run/juju-installer.socket"); s.send(b"i"); s.recv(1)' >/dev/null
@@ -86,6 +95,7 @@ BOOTSTRAPPED=0
 
 if [ ! -x "${SNAP_BIN}" ]; then
     # Snap not installed — need to trigger service
+    check_cgroup
     check_socket_access
 
     if is_deploy_command "$@"; then
@@ -103,6 +113,7 @@ if [ ! -x "${SNAP_BIN}" ]; then
 elif is_deploy_command "$@"; then
     # Snap installed but maybe no controller yet
     if ! has_controller || ! has_model; then
+        check_cgroup
         do_bootstrap
     fi
 fi
