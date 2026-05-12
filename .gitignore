@@ -1,0 +1,9 @@
+debian/.debhelper/
+debian/debhelper-build-stamp
+debian/files
+debian/juju-installer.postrm.debhelper
+debian/juju-installer.substvars
+debian/juju-installer/
+*.deb
+*.buildinfo
+*.changes
