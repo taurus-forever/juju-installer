@@ -1,4 +1,4 @@
-juju-installer (1) noble; urgency=medium
+juju-installer (0.0.1) noble; urgency=medium
 
   * Initial release.
   * Wrapper to install Juju snap and bootstrap LXD controller on demand.

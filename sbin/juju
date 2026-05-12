@@ -29,7 +29,7 @@ check_socket_access() {
 }
 
 trigger_service() {
-    show_progress "[1/5] Preparing Juju environment..."
+    show_progress "[1/5] Preparing Juju environment (this may take a few minutes)..."
     python3 -c 'import socket; s=socket.socket(socket.AF_UNIX); s.connect("/run/juju-installer.socket"); s.send(b"i"); s.recv(1)' >/dev/null
 }
 
@@ -73,11 +73,14 @@ do_bootstrap() {
     fi
 
     clear_progress
+    BOOTSTRAPPED=1
 }
 
 is_deploy_command() {
     [ "${1:-}" = "deploy" ]
 }
+
+BOOTSTRAPPED=0
 
 # --- Main logic ---
 
@@ -104,4 +107,10 @@ elif is_deploy_command "$@"; then
     fi
 fi
 
+if [ "$BOOTSTRAPPED" -eq 1 ]; then
+    "${SNAP_BIN}" "$@"
+    rc=$?
+    [ "$rc" -eq 0 ] && echo "Hint: run 'juju status' to track deployment progress." >&2
+    exit "$rc"
+fi
 exec "${SNAP_BIN}" "$@"

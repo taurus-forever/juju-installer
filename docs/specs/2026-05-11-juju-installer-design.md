@@ -148,11 +148,12 @@ Progress comes from two sources: the service (steps 1-3) and the wrapper (steps 
 
 Single overwriting line via `\r` — shows current step, each new step overwrites the previous (Canonical craft-tools style):
   ```
-  \r[1/5] Installing Juju snap...
+  \r[1/5] Preparing Juju environment (this may take a few minutes)...
   \r[2/5] Installing LXD...
   \r[3/5] Initializing LXD...
   \r[4/5] Bootstrapping Juju controller (this may take a few minutes)...
   \r[5/5] Creating welcome model...
+  Hint: run 'juju status' to track deployment progress.
   ```
 - Steps 1-3 run as root in the service; steps 4-5 run as the user in the wrapper
 
@@ -183,6 +184,8 @@ After the service completes and `/snap/bin/juju` is available, the wrapper perfo
 These run as the calling user, so `~/.local/share/juju` is populated correctly without any chown or JUJU_DATA overrides.
 
 If either step fails or times out, the wrapper prints the error and exits non-zero. Re-running the command resumes from the failed step — the bootstrap check detects the existing controller (if step 1 succeeded) and skips to step 2.
+
+After a successful deploy following bootstrap, the wrapper prints: `Hint: run 'juju status' to track deployment progress.` This hint only appears when bootstrap was performed — on pass-through (scenario 4), the wrapper is completely silent.
 
 ### Systemd Units
 
