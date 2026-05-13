@@ -4,12 +4,17 @@ set -eu
 # shellcheck disable=SC2034
 MODE=$(head -c1)
 
-required_kib=$((5 * 1024 * 1024))
+# Empirical floor: snap install juju (~0.5 GiB) + snap install k8s (~1.5 GiB)
+# + k8s bootstrap (~0.5 GiB) + local-storage CSI driver (~0.2 GiB) + juju
+# bootstrap images (~1 GiB) + controller PVC sparse file (~1 GiB) + runtime
+# headroom. 5 GiB was too low — passed the precheck but ran out before the
+# controller PVC could be allocated by rawfile-csi.
+required_kib=$((10 * 1024 * 1024))
 available_kib=$(df -k --output=avail /var 2>/dev/null | awk 'NR==2{print $1}')
 if [ -z "${available_kib:-}" ] || [ "$available_kib" -lt "$required_kib" ]; then
     avail_gib=$(( ${available_kib:-0} / 1024 / 1024 ))
-    printf 'ERROR: Insufficient free disk space on /var (%s GiB available, 5 GiB minimum).\n' "$avail_gib"
-    printf 'ERROR: Juju/K8s need disk for snaps & containers. Free up space and retry.\n'
+    printf 'ERROR: Insufficient free disk space on /var (%s GiB available, 10 GiB minimum).\n' "$avail_gib"
+    printf 'ERROR: Juju/K8s need disk for snaps, container images, and the controller PVC. Free up space and retry.\n'
     exit 1
 fi
 
