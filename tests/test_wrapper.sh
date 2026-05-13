@@ -302,7 +302,7 @@ echo "=== Root user check ==="
 
 test_root_blocked_deploy() {
     setup
-    patch_wrapper -e 's/$(id -u)/0/g'
+    patch_wrapper -e "s/\$(id -u)/0/g"
     run_patched deploy postgresql
     result=0
     [ "$LAST_RC" -ne 0 ] || { echo "  ASSERT FAILED: expected non-zero exit"; result=1; }
@@ -315,7 +315,7 @@ test_root_blocked_deploy; report "root blocked on deploy" $?
 test_root_allowed_passthrough() {
     setup
     make_fake_snap
-    patch_wrapper -e 's/$(id -u)/0/g'
+    patch_wrapper -e "s/\$(id -u)/0/g"
     run_patched version
     result=0
     [ "$LAST_RC" -eq 0 ] || { echo "  ASSERT FAILED: expected exit 0"; result=1; }
