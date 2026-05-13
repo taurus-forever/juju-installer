@@ -1,3 +1,13 @@
+juju-installer (0.1.6) noble; urgency=medium
+
+  * Fix: add pre-snap-install disk-space check (5 GiB on /var) to both LXD
+    and K8s service scripts. Aborts cleanly with an actionable message
+    before juju/k8s bootstrap fails opaquely on tight-disk hosts.
+  * Fix: anchor the K8s cluster-readiness fallback regex so it no longer
+    treats `cluster status: not ready` as ready (substring match bug).
+
+ -- Alex Lutay <alex.lutay@canonical.com>  Wed, 13 May 2026 11:35:00 +0000
+
 juju-installer (0.1.5) noble; urgency=medium
 
   * Add CLAUDE.md, AGENTS.md, and .github/copilot-instructions.md for AI
