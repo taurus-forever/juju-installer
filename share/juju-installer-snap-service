@@ -1,15 +1,12 @@
 #!/bin/sh
 set -eu
 
-# Read mode byte from wrapper
 # shellcheck disable=SC2034
 MODE=$(head -c1)
 
-# Install Juju snap if not present
 if [ ! -x /snap/bin/juju ]; then
-    echo "[1/1] Installing Juju snap..." 1>&2
-    snap install juju 1>&2
+    printf '[1/1] Installing Juju snap...\n'
+    snap install juju >&2 2>&1
 fi
 
-# Signal completion
 echo 1

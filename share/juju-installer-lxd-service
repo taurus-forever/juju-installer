@@ -1,7 +1,6 @@
 #!/bin/sh
 set -eu
 
-# Read mode byte from wrapper
 # shellcheck disable=SC2034
 MODE=$(head -c1)
 
@@ -9,21 +8,19 @@ required_kib=$((5 * 1024 * 1024))
 available_kib=$(df -k --output=avail /var 2>/dev/null | awk 'NR==2{print $1}')
 if [ -z "${available_kib:-}" ] || [ "$available_kib" -lt "$required_kib" ]; then
     avail_gib=$(( ${available_kib:-0} / 1024 / 1024 ))
-    echo "ERROR: Insufficient free disk space on /var (${avail_gib} GiB available, 5 GiB minimum)." 1>&2
-    echo "Juju/LXD need disk for snaps & containers. Free up space and retry." 1>&2
+    printf 'ERROR: Insufficient free disk space on /var (%s GiB available, 5 GiB minimum).\n' "$avail_gib"
+    printf 'ERROR: Juju/LXD need disk for snaps & containers. Free up space and retry.\n'
     exit 1
 fi
 
-# Step 1: Install Juju snap if not present
 if [ ! -x /snap/bin/juju ]; then
-    echo "[1/3] Installing Juju snap..." 1>&2
-    snap install juju 1>&2
+    printf '[2/5] Installing Juju snap...\n'
+    snap install juju >&2 2>&1
 fi
 
-# Step 2: Ensure LXD snap is available
 if [ ! -x /snap/bin/lxd ]; then
-    echo "[2/3] Installing LXD..." 1>&2
-    python3 -c 'import socket; s=socket.socket(socket.AF_UNIX); s.connect("/run/lxd-installer.socket"); s.send(b"x"); s.recv(1)' 1>&2
+    printf '[3/5] Installing LXD...\n'
+    python3 -c 'import socket; s=socket.socket(socket.AF_UNIX); s.connect("/run/lxd-installer.socket"); s.send(b"x"); s.recv(1)' >&2 2>&1
     i=0
     while [ "$i" -lt 90 ]; do
         sleep 1
@@ -31,16 +28,14 @@ if [ ! -x /snap/bin/lxd ]; then
         i=$((i + 1))
     done
     if [ ! -x /snap/bin/lxd ]; then
-        echo "ERROR: LXD snap installation timed out." 1>&2
+        printf 'ERROR: LXD snap installation timed out.\n'
         exit 1
     fi
 fi
 
-# Step 3: Initialize LXD if needed
 if ! /snap/bin/lxc storage list --format csv 2>/dev/null | grep -q default; then
-    echo "[3/3] Initializing LXD..." 1>&2
-    /snap/bin/lxd init --auto 1>&2
+    printf '[3/5] Initializing LXD...\n'
+    /snap/bin/lxd init --auto >&2 2>&1
 fi
 
-# Signal completion
 echo 1
