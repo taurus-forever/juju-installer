@@ -302,7 +302,7 @@ echo "=== Root user check ==="
 
 test_root_blocked_deploy() {
     setup
-    patch_wrapper -e 's/$(id -u)/0/g'
+    patch_wrapper -e "s/\$(id -u)/0/g"
     run_patched deploy postgresql
     result=0
     [ "$LAST_RC" -ne 0 ] || { echo "  ASSERT FAILED: expected non-zero exit"; result=1; }
@@ -315,7 +315,7 @@ test_root_blocked_deploy; report "root blocked on deploy" $?
 test_root_allowed_passthrough() {
     setup
     make_fake_snap
-    patch_wrapper -e 's/$(id -u)/0/g'
+    patch_wrapper -e "s/\$(id -u)/0/g"
     run_patched version
     result=0
     [ "$LAST_RC" -eq 0 ] || { echo "  ASSERT FAILED: expected exit 0"; result=1; }
@@ -471,6 +471,238 @@ test_k8s_progress_step_count() {
     return $result
 }
 test_k8s_progress_step_count; report "K8s path shows [1/9]" $?
+
+echo ""
+echo "=== Edge cases ==="
+
+test_deploy_no_charm_name() {
+    setup
+    make_sockets_writable
+    patch_wrapper
+    run_patched deploy
+    result=0
+    assert_stderr_contains "LXD snaps" || result=1
+    teardown
+    return $result
+}
+test_deploy_no_charm_name; report "deploy with no charm name defaults to LXD" $?
+
+test_deploy_ch_prefix_k8s() {
+    setup
+    make_sockets_writable
+    patch_wrapper
+    run_patched deploy ch:postgresql-k8s
+    result=0
+    assert_stderr_contains "Canonical K8s snaps" || result=1
+    teardown
+    return $result
+}
+test_deploy_ch_prefix_k8s; report "ch:postgresql-k8s -> K8s path" $?
+
+test_deploy_local_path() {
+    setup
+    make_sockets_writable
+    patch_wrapper
+    run_patched deploy ./local-charm
+    result=0
+    assert_stderr_contains "LXD snaps" || result=1
+    teardown
+    return $result
+}
+test_deploy_local_path; report "./local-charm -> LXD path" $?
+
+test_deploy_many_flags() {
+    setup
+    make_sockets_writable
+    patch_wrapper
+    run_patched deploy --channel 14/edge --num-units 3 postgresql-k8s --trust
+    result=0
+    assert_stderr_contains "Canonical K8s snaps" || result=1
+    teardown
+    return $result
+}
+test_deploy_many_flags; report "multiple combined flags handled" $?
+
+echo ""
+echo "=== Exit code propagation ==="
+
+test_exit_code_passthrough() {
+    setup
+    mkdir -p "$(dirname "${FAKE_SNAP_BIN}")"
+    printf '#!/bin/sh\nexit 42\n' > "${FAKE_SNAP_BIN}"
+    chmod +x "${FAKE_SNAP_BIN}"
+    patch_wrapper
+    run_patched version
+    result=0
+    [ "$LAST_RC" -eq 42 ] || { echo "  ASSERT FAILED: expected exit 42, got $LAST_RC"; result=1; }
+    teardown
+    return $result
+}
+test_exit_code_passthrough; report "exit code propagated on passthrough" $?
+
+test_exit_code_after_bootstrap() {
+    setup
+    make_sockets_writable
+    patch_wrapper
+    # Override mock-juju to exit 42 on deploy, 0 on everything else
+    sed -i "s|echo \"mock-juju \$@\"|case \"\$1\" in deploy) exit 42;; *) echo \"mock-juju \$@\";; esac|" "${PATCHED}"
+    run_patched deploy postgresql
+    result=0
+    [ "$LAST_RC" -eq 42 ] || { echo "  ASSERT FAILED: expected exit 42, got $LAST_RC"; result=1; }
+    teardown
+    return $result
+}
+test_exit_code_after_bootstrap; report "exit code propagated after bootstrap" $?
+
+echo ""
+echo "=== wait_for_snap timeout ==="
+
+test_wait_for_snap_timeout() {
+    setup
+    make_sockets_writable
+    # Build a custom patched wrapper that keeps wait_for_snap but with short timeout
+    PATCHED="${TEST_DIR}/wrapper.sh"
+    sed \
+        -e "s|SNAP_BIN=\"/snap/bin/juju\"|SNAP_BIN=\"${FAKE_SNAP_BIN}\"|" \
+        -e "s|/run/juju-installer-snap.socket|${FAKE_SNAP_SOCKET}|g" \
+        -e "s|/run/juju-installer-lxd.socket|${FAKE_LXD_SOCKET}|g" \
+        -e "s|/run/juju-installer-k8s.socket|${FAKE_K8S_SOCKET}|g" \
+        -e "s|/proc/self/cgroup|${FAKE_CGROUP}|g" \
+        "${WRAPPER}" > "${PATCHED}"
+    sed -i 's/read -r answer < \/dev\/tty || answer="y"/answer="y"/' "${PATCHED}"
+    # trigger_snap_service does nothing (snap binary never appears)
+    sed -i "/^trigger_snap_service() {/,/^}/c\\
+trigger_snap_service() { :; }" "${PATCHED}"
+    # Reduce wait_for_snap to 1 iteration with no sleep
+    sed -i 's/while \[ "\$i" -lt 90 \]/while [ "$i" -lt 1 ]/' "${PATCHED}"
+    sed -i '/wait_for_snap/,/^}/ s/sleep 1/sleep 0/' "${PATCHED}"
+    chmod +x "${PATCHED}"
+    run_patched version
+    result=0
+    [ "$LAST_RC" -ne 0 ] || { echo "  ASSERT FAILED: expected non-zero exit"; result=1; }
+    assert_stderr_contains "timed out" || result=1
+    teardown
+    return $result
+}
+test_wait_for_snap_timeout; report "wait_for_snap timeout exits with error" $?
+
+echo ""
+echo "=== Bootstrap idempotency (LXD) ==="
+
+patch_wrapper_with_real_bootstrap_lxd() {
+    PATCHED="${TEST_DIR}/wrapper.sh"
+    sed \
+        -e "s|SNAP_BIN=\"/snap/bin/juju\"|SNAP_BIN=\"${FAKE_SNAP_BIN}\"|" \
+        -e "s|/run/juju-installer-snap.socket|${FAKE_SNAP_SOCKET}|g" \
+        -e "s|/run/juju-installer-lxd.socket|${FAKE_LXD_SOCKET}|g" \
+        -e "s|/run/juju-installer-k8s.socket|${FAKE_K8S_SOCKET}|g" \
+        -e "s|/proc/self/cgroup|${FAKE_CGROUP}|g" \
+        "${WRAPPER}" > "${PATCHED}"
+    sed -i 's/read -r answer < \/dev\/tty || answer="y"/answer="y"/' "${PATCHED}"
+
+    _STUB="mkdir -p \"\$(dirname \"${FAKE_SNAP_BIN}\")\"; printf '#!/bin/sh\\\necho \"mock-juju \$@\"\\\n' > \"${FAKE_SNAP_BIN}\"; chmod +x \"${FAKE_SNAP_BIN}\""
+    sed -i "/^trigger_snap_service() {/,/^}/c\\
+trigger_snap_service() { ${_STUB}; }" "${PATCHED}"
+    sed -i "/^trigger_lxd_service() {/,/^}/c\\
+trigger_lxd_service() { ${_STUB}; }" "${PATCHED}"
+    sed -i "/^trigger_k8s_service() {/,/^}/c\\
+trigger_k8s_service() { ${_STUB}; }" "${PATCHED}"
+    sed -i "/^wait_for_snap() {/,/^}/ { s/sleep 1/sleep 0/; }" "${PATCHED}"
+
+    # Stub has_* checks based on env vars (keep real bootstrap functions)
+    sed -i "/^has_lxd_controller() {/,/^}/c\\
+has_lxd_controller() { [ \"\${MOCK_HAS_LXD_CONTROLLER:-0}\" -eq 1 ]; }" "${PATCHED}"
+    sed -i "/^has_k8s_cloud() {/,/^}/c\\
+has_k8s_cloud() { [ \"\${MOCK_HAS_K8S_CLOUD:-0}\" -eq 1 ]; }" "${PATCHED}"
+    sed -i "/^has_k8s_controller() {/,/^}/c\\
+has_k8s_controller() { [ \"\${MOCK_HAS_K8S_CONTROLLER:-0}\" -eq 1 ]; }" "${PATCHED}"
+    sed -i "/^has_model() {/,/^}/c\\
+has_model() { [ \"\${MOCK_HAS_MODEL:-0}\" -eq 1 ]; }" "${PATCHED}"
+
+    # do_bootstrap_k8s reads kubeconfig from /run/ — redirect to test dir
+    sed -i "s|/run/juju-installer-k8s-kubeconfig|${TEST_DIR}/kubeconfig|g" "${PATCHED}"
+
+    chmod +x "${PATCHED}"
+}
+
+test_lxd_skip_existing_controller() {
+    setup
+    make_sockets_writable
+    patch_wrapper_with_real_bootstrap_lxd
+    MOCK_HAS_LXD_CONTROLLER=1 run_patched deploy postgresql
+    result=0
+    assert_stderr_not_contains "Bootstrapping" || result=1
+    assert_stderr_contains "Creating welcome model" || result=1
+    teardown
+    return $result
+}
+test_lxd_skip_existing_controller; report "LXD: skips bootstrap when controller exists" $?
+
+test_lxd_skip_existing_model() {
+    setup
+    make_sockets_writable
+    patch_wrapper_with_real_bootstrap_lxd
+    MOCK_HAS_MODEL=1 run_patched deploy postgresql
+    result=0
+    assert_stderr_contains "Bootstrapping" || result=1
+    assert_stderr_not_contains "Creating welcome model" || result=1
+    teardown
+    return $result
+}
+test_lxd_skip_existing_model; report "LXD: skips add-model when model exists" $?
+
+echo ""
+echo "=== Bootstrap idempotency (K8s) ==="
+
+test_k8s_missing_kubeconfig() {
+    setup
+    make_sockets_writable
+    patch_wrapper_with_real_bootstrap_lxd
+    # Do NOT create the kubeconfig file
+    run_patched deploy postgresql-k8s --trust
+    result=0
+    [ "$LAST_RC" -ne 0 ] || { echo "  ASSERT FAILED: expected non-zero exit"; result=1; }
+    assert_stderr_contains "kubeconfig not found" || result=1
+    teardown
+    return $result
+}
+test_k8s_missing_kubeconfig; report "K8s: error when kubeconfig missing" $?
+
+test_k8s_kubeconfig_backup() {
+    setup
+    make_sockets_writable
+    patch_wrapper_with_real_bootstrap_lxd
+    # Redirect HOME to test dir so ~/.kube is under our control
+    sed -i "s|\${HOME}|${TEST_DIR}/home|g" "${PATCHED}"
+    mkdir -p "${TEST_DIR}/home/.kube"
+    echo "old-config" > "${TEST_DIR}/home/.kube/config"
+    echo "fake-kubeconfig" > "${TEST_DIR}/kubeconfig"
+    MOCK_HAS_K8S_CLOUD=1 MOCK_HAS_K8S_CONTROLLER=1 MOCK_HAS_MODEL=1 \
+        run_patched deploy postgresql-k8s --trust
+    result=0
+    [ -f "${TEST_DIR}/home/.kube/config.bak" ] || { echo "  ASSERT FAILED: config.bak not created"; result=1; }
+    grep -q "old-config" "${TEST_DIR}/home/.kube/config.bak" 2>/dev/null || { echo "  ASSERT FAILED: config.bak has wrong content"; result=1; }
+    grep -q "fake-kubeconfig" "${TEST_DIR}/home/.kube/config" 2>/dev/null || { echo "  ASSERT FAILED: config not updated"; result=1; }
+    teardown
+    return $result
+}
+test_k8s_kubeconfig_backup; report "K8s: backs up existing kubeconfig" $?
+
+test_k8s_skip_existing_cloud() {
+    setup
+    make_sockets_writable
+    patch_wrapper_with_real_bootstrap_lxd
+    echo "fake-kubeconfig" > "${TEST_DIR}/kubeconfig"
+    sed -i "s|\${HOME}|${TEST_DIR}/home|g" "${PATCHED}"
+    mkdir -p "${TEST_DIR}/home/.kube"
+    MOCK_HAS_K8S_CLOUD=1 run_patched deploy postgresql-k8s --trust
+    result=0
+    assert_stderr_not_contains "Registering" || result=1
+    assert_stderr_contains "Bootstrapping" || result=1
+    teardown
+    return $result
+}
+test_k8s_skip_existing_cloud; report "K8s: skips add-k8s when cloud exists" $?
 
 # ============================================================
 # Summary

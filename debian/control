@@ -4,6 +4,7 @@ Priority: optional
 Maintainer: Alex Lutay <alex.lutay@canonical.com>
 Build-Depends: debhelper-compat (= 13)
 Standards-Version: 4.6.2
+Homepage: https://github.com/taurus-forever/juju-installer
 Rules-Requires-Root: no
 
 Package: juju-installer

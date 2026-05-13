@@ -1,0 +1,9 @@
+name: Weekly test
+
+on:
+  schedule:
+    - cron: '42 3 * * 5'
+
+jobs:
+  test:
+    uses: ./.github/workflows/_test.yml
