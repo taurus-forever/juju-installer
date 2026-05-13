@@ -961,6 +961,41 @@ has_model() { false; }" "${PATCHED}"
 }
 run_proto_test "K8s: [8/9] label shared between cloud-register and bootstrap" test_k8s_8_9_label_shared
 
+# Regression test: relay_progress failure must exit the wrapper promptly,
+# not silently fall through into wait_for_snap's 90s timeout loop.
+# patch_wrapper_with_real_relay normally stubs `sleep 1` → `sleep 0`, which
+# would hide the bug. Here we override wait_for_snap with a real 3-iteration
+# sleep-1 loop: under the bug, the wrapper sleeps 3s; under the fix, it
+# exits before reaching wait_for_snap.
+test_relay_failure_exits_promptly() {
+    setup
+    SCRIPT="${TEST_DIR}/script"
+    printf '__CLOSE__\n' > "$SCRIPT"
+    start_mock_service "${FAKE_K8S_SOCKET}" "$SCRIPT"
+    patch_wrapper_with_real_relay
+    sed -i "/^wait_for_snap() {/,/^}/c\\
+wait_for_snap() {\\
+    i=0\\
+    while [ \"\$i\" -lt 3 ]; do\\
+        sleep 1\\
+        [ -x \"\${SNAP_BIN}\" ] && return 0\\
+        i=\$((i + 1))\\
+    done\\
+    echo \"ERROR: Juju snap installation timed out.\" >&2\\
+    exit 1\\
+}" "${PATCHED}"
+    start=$(date +%s)
+    run_patched deploy postgresql-k8s --trust
+    elapsed=$(( $(date +%s) - start ))
+    result=0
+    [ "$LAST_RC" -ne 0 ] || { echo "  ASSERT FAILED: expected non-zero exit"; result=1; }
+    [ "$elapsed" -lt 2 ] || { echo "  ASSERT FAILED: relay failure took ${elapsed}s, expected <2s"; result=1; }
+    stop_mock_service
+    teardown
+    return $result
+}
+run_proto_test "relay: failure exits in <2s (no dead wait)" test_relay_failure_exits_promptly
+
 # ============================================================
 # Summary
 # ============================================================
