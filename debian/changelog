@@ -22,8 +22,15 @@ juju-installer (0.2.1) noble; urgency=medium
     service-level Layer-3 tests bring the suite to 69 tests.
   * Resolve shellcheck SC2015 in test_services.sh chatter-leak assertions
     (replace `A && B || C` pattern with `if A; then B; fi`).
+  * Fix: wait for local-storage to be functional (default StorageClass
+    present, no Pending pods) before exiting [6/9]. `k8s enable
+    local-storage` returns when the feature is toggled, not when the
+    provisioner is serving; juju bootstrap raced against an unready
+    provisioner and the controller PVC got stuck in "provisioning
+    failed" for the full bootstrap timeout. Fail fast in 60s with a
+    `kubectl describe`-pointing error if storage doesn't become ready.
 
- -- Alex Lutay <alex.lutay@canonical.com>  Wed, 13 May 2026 12:25:00 +0000
+ -- Alex Lutay <alex.lutay@canonical.com>  Wed, 13 May 2026 12:35:00 +0000
 
 juju-installer (0.1.8) noble; urgency=medium
 

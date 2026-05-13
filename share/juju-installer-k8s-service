@@ -47,6 +47,34 @@ if ! /snap/bin/k8s status 2>/dev/null | grep -q "local-storage.*enabled"; then
     /snap/bin/k8s enable local-storage >&2 2>&1
 fi
 
+# `k8s enable local-storage` returns when the feature is toggled, not when
+# the provisioner is actually serving. Without this wait, juju bootstrap
+# races against an unready provisioner and the controller PVC gets stuck
+# in "provisioning failed" for the full 10-minute bootstrap timeout.
+printf '[6/9] Waiting for local storage to be ready...\n'
+i=0
+ok=0
+while [ "$i" -lt 30 ]; do
+    if /snap/bin/k8s kubectl get sc 2>/dev/null | grep -q '(default)'; then
+        pending=$(/snap/bin/k8s kubectl get pods -A --field-selector=status.phase=Pending --no-headers 2>/dev/null | wc -l)
+        if [ "${pending:-1}" -eq 0 ]; then
+            ok=1
+            break
+        fi
+    fi
+    sleep 2
+    i=$((i + 1))
+done
+if [ "$ok" -ne 1 ]; then
+    if ! /snap/bin/k8s kubectl get sc 2>/dev/null | grep -q '(default)'; then
+        printf 'ERROR: No default StorageClass after enabling local-storage.\n'
+    else
+        printf 'ERROR: Storage provisioner not ready after 60s (Pending pods present).\n'
+    fi
+    printf 'ERROR: Run: sudo k8s kubectl get sc; sudo k8s kubectl get pods -A\n'
+    exit 1
+fi
+
 printf '[7/9] Exporting kubeconfig...\n'
 /snap/bin/k8s config > /run/juju-installer-k8s-kubeconfig
 chmod 0640 /run/juju-installer-k8s-kubeconfig

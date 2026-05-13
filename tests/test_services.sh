@@ -312,6 +312,13 @@ case "$1" in
         ;;
     enable)
         ;;
+    kubectl)
+        shift
+        case "$1 $2" in
+            "get sc") echo "ck8s-default (default)   rancher.io/local-path   Delete   WaitForFirstConsumer   false   1m" ;;
+            "get pods") ;;
+        esac
+        ;;
 esac
 FAKEOF
     chmod +x "${FAKE_BIN}/k8s"
@@ -324,6 +331,13 @@ make_k8s_fake_ready() {
 case "$1" in
     status) echo "cluster status:  ready"; echo "local-storage    enabled"; exit 0 ;;
     config) echo "fake-kubeconfig-data" ;;
+    kubectl)
+        shift
+        case "$1 $2" in
+            "get sc") echo "ck8s-default (default)   rancher.io/local-path   Delete   WaitForFirstConsumer   false   1m" ;;
+            "get pods") ;;
+        esac
+        ;;
 esac
 FAKEOF
     chmod +x "${FAKE_BIN}/k8s"
@@ -361,6 +375,13 @@ case "$1" in
     bootstrap) touch "$0.bootstrapped" ;;
     config) echo "fake-kubeconfig-data" ;;
     enable) ;;
+    kubectl)
+        shift
+        case "$1 $2" in
+            "get sc") echo "ck8s-default (default)   rancher.io/local-path   Delete   WaitForFirstConsumer   false   1m" ;;
+            "get pods") ;;
+        esac
+        ;;
 esac
 FAKEOF
     chmod +x "${K8S_STAGED}"
@@ -491,6 +512,39 @@ test_k8s_idempotent() {
 }
 test_k8s_idempotent; report "k8s: idempotent, only exports kubeconfig" $?
 
+test_k8s_storage_not_ready() {
+    setup
+    make_fake_bin "snap"
+    make_fake_bin "juju"
+    # k8s fake: cluster ready, local-storage "enabled" via status,
+    # but kubectl get sc reports no (default) → wait loop times out.
+    printf '#!/bin/sh\necho "k8s $@" >> "%s"\n' "${CALL_LOG}" > "${FAKE_BIN}/k8s"
+    cat >> "${FAKE_BIN}/k8s" << 'FAKEOF'
+case "$1" in
+    status) echo "cluster status:  ready"; echo "local-storage    enabled"; exit 0 ;;
+    config) echo "fake-kubeconfig-data" ;;
+    kubectl)
+        shift
+        case "$1 $2" in
+            "get sc") echo "some-class   rancher.io/local-path   Delete   WaitForFirstConsumer   false   1m" ;;
+            "get pods") ;;
+        esac
+        ;;
+esac
+FAKEOF
+    chmod +x "${FAKE_BIN}/k8s"
+    patch_service "juju-installer-k8s-service"
+    # Shrink the 30-iteration storage-ready loop to 1 iteration
+    sed -i 's/while \[ "\$i" -lt 30 \]/while [ "$i" -lt 1 ]/' "${PATCHED}"
+    run_service
+    result=0
+    [ "$LAST_RC" -ne 0 ] || { echo "  ASSERT FAILED: expected non-zero exit"; result=1; }
+    assert_stdout_contains "No default StorageClass" || result=1
+    teardown
+    return $result
+}
+test_k8s_storage_not_ready; report "k8s: fails fast when storage not ready" $?
+
 echo ""
 echo "=== Service stdout protocol (Layer 3) ==="
 
@@ -511,6 +565,13 @@ case "$1" in
     bootstrap) touch "$0.bootstrapped" ;;
     config) echo "fake-kubeconfig-data" ;;
     enable) touch "$0.storage" ;;
+    kubectl)
+        shift
+        case "$1 $2" in
+            "get sc") echo "ck8s-default (default)   rancher.io/local-path   Delete   WaitForFirstConsumer   false   1m" ;;
+            "get pods") ;;
+        esac
+        ;;
 esac
 FAKEOF
     chmod +x "${K8S_STAGED}"
