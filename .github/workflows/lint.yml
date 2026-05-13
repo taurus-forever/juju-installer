@@ -9,4 +9,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: shellcheck sbin/juju share/*
+      - run: shellcheck sbin/juju share/* tests/*.sh
