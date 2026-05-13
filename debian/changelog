@@ -20,8 +20,10 @@ juju-installer (0.2.1) noble; urgency=medium
   * Tests: new mock-service helper spawns a real AF_UNIX listener with a
     readiness sentinel; 8 new wrapper-level protocol tests + 3 new
     service-level Layer-3 tests bring the suite to 69 tests.
+  * Resolve shellcheck SC2015 in test_services.sh chatter-leak assertions
+    (replace `A && B || C` pattern with `if A; then B; fi`).
 
- -- Alex Lutay <alex.lutay@canonical.com>  Wed, 13 May 2026 12:20:00 +0000
+ -- Alex Lutay <alex.lutay@canonical.com>  Wed, 13 May 2026 12:25:00 +0000
 
 juju-installer (0.1.8) noble; urgency=medium
 
