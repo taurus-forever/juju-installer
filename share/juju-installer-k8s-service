@@ -5,6 +5,15 @@ set -eu
 # shellcheck disable=SC2034
 MODE=$(head -c1)
 
+required_kib=$((5 * 1024 * 1024))
+available_kib=$(df -k --output=avail /var 2>/dev/null | awk 'NR==2{print $1}')
+if [ -z "${available_kib:-}" ] || [ "$available_kib" -lt "$required_kib" ]; then
+    avail_gib=$(( ${available_kib:-0} / 1024 / 1024 ))
+    echo "ERROR: Insufficient free disk space on /var (${avail_gib} GiB available, 5 GiB minimum)." 1>&2
+    echo "Juju/K8s need disk for snaps & containers. Free up space and retry." 1>&2
+    exit 1
+fi
+
 # Step 1: Install Juju snap if not present
 if [ ! -x /snap/bin/juju ]; then
     echo "[1/6] Installing Juju snap..." 1>&2
@@ -33,7 +42,7 @@ while [ "$i" -lt 60 ]; do
     sleep 5
     i=$((i + 1))
 done
-if ! /snap/bin/k8s status 2>/dev/null | grep -q "cluster status:.*ready"; then
+if ! /snap/bin/k8s status 2>/dev/null | grep -qE "cluster status:[[:space:]]+ready[[:space:]]*$"; then
     echo "ERROR: Canonical K8s did not become ready." 1>&2
     exit 1
 fi
