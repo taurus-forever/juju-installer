@@ -13,6 +13,8 @@ On a fresh Ubuntu 24.04+ system, `juju-installer` handles everything automatical
 installing the required snaps, initializing the substrate (LXD or Canonical K8s),
 bootstrapping a Juju controller, creating a model, and executing the deploy.
 
+[![asciicast](https://asciinema.org/a/dTK6RJteUDDatNTX.svg)](https://asciinema.org/a/dTK6RJteUDDatNTX)
+
 ## How It Works
 
 `juju-installer` follows the same pattern as Ubuntu's
