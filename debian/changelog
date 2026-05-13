@@ -1,3 +1,9 @@
+juju-installer (0.1.7) noble; urgency=medium
+
+  * Add integration test workflow design spec.
+
+ -- Alex Lutay <alex.lutay@canonical.com>  Tue, 13 May 2026 13:00:00 +0000
+
 juju-installer (0.1.6) noble; urgency=medium
 
   * Fix: add pre-snap-install disk-space check (5 GiB on /var) to both LXD
