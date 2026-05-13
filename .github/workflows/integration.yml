@@ -1,0 +1,93 @@
+name: Integration
+
+on:
+  schedule:
+    - cron: '42 3 * * 5'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integration-lxd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Purge pre-installed LXD
+        run: sudo snap remove --purge lxd
+
+      - name: Add PPA and install juju-installer
+        run: |
+          sudo add-apt-repository -y ppa:taurus/juju-installer
+          sudo apt-get update
+          sudo apt-get install -y juju-installer
+
+      - name: Configure LXD group membership
+        run: sudo adduser "$(whoami)" lxd
+
+      - name: Enable systemd sockets
+        run: |
+          sudo systemctl enable --now juju-installer-snap.socket
+          sudo systemctl enable --now juju-installer-lxd.socket
+
+      - name: Verify sockets are active
+        run: |
+          systemctl is-active juju-installer-snap.socket
+          systemctl is-active juju-installer-lxd.socket
+
+      - name: Verify PATH ordering
+        run: which juju | grep -q /sbin/juju
+
+      - name: Deploy postgresql (LXD flow)
+        run: sg lxd -c 'systemd-run --user --scope juju deploy postgresql'
+
+      - name: Verify juju status
+        run: sg lxd -c 'juju status' | grep -q 'Controller:'
+
+      - name: Collect diagnostics
+        if: failure()
+        run: |
+          journalctl -u juju-installer-snap.service --no-pager || true
+          journalctl -u juju-installer-lxd.service --no-pager || true
+          sg lxd -c 'juju status' || true
+          sg lxd -c 'juju debug-log --limit 50' || true
+
+  integration-k8s:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Add PPA and install juju-installer
+        run: |
+          sudo add-apt-repository -y ppa:taurus/juju-installer
+          sudo apt-get update
+          sudo apt-get install -y juju-installer
+
+      - name: Configure LXD group membership
+        run: sudo adduser "$(whoami)" lxd
+
+      - name: Enable systemd sockets
+        run: |
+          sudo systemctl enable --now juju-installer-snap.socket
+          sudo systemctl enable --now juju-installer-k8s.socket
+
+      - name: Verify sockets are active
+        run: |
+          systemctl is-active juju-installer-snap.socket
+          systemctl is-active juju-installer-k8s.socket
+
+      - name: Verify PATH ordering
+        run: which juju | grep -q /sbin/juju
+
+      - name: Deploy postgresql-k8s (K8s flow)
+        run: sg lxd -c 'systemd-run --user --scope juju deploy postgresql-k8s --trust'
+
+      - name: Verify juju status
+        run: sg lxd -c 'juju status' | grep -q 'Controller:'
+
+      - name: Collect diagnostics
+        if: failure()
+        run: |
+          journalctl -u juju-installer-snap.service --no-pager || true
+          journalctl -u juju-installer-k8s.service --no-pager || true
+          sg lxd -c 'juju status' || true
+          sg lxd -c 'juju debug-log --limit 50' || true
