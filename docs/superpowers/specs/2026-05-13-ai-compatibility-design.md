@@ -45,6 +45,23 @@ Comprehensive project instructions for Claude Code. Sections:
 - Modeled after Ubuntu's `lxd-installer` package
 - Part of Canonical; Apache 2.0 licensed
 
+### Design philosophy
+
+The package is intentionally minimal:
+- **As small as possible**: every line of code must earn its place; no
+  bloat, no convenience wrappers that could be avoided
+- **No external dependencies**: the wrapper and service scripts rely only on
+  coreutils, Python 3 (for socket activation), and the snaps they install;
+  never pull in extra packages
+- **Human-readable**: the shell scripts are the documentation; anyone should
+  be able to read `sbin/juju` top-to-bottom and understand the full flow
+  without external context
+
+When contributing, prefer removing code over adding it. If a feature can be
+achieved without new dependencies, that is the only acceptable path. If a
+change makes the scripts harder to read at a glance, it needs to be
+simplified before merge.
+
 ### Canonical policies
 
 - Ubuntu Code of Conduct applies to all contributions
@@ -109,6 +126,9 @@ Write "for example" not "e.g.", "that is" not "i.e.".
 - `debian/changelog`: version history in Debian format
 - `debian/install`: maps source files to install locations
 - `debian/rules`: build rules (uses debhelper)
+- Dependencies must stay minimal; never add a new `Depends:` entry unless
+  absolutely unavoidable. The current dependency list (`lxd-installer`,
+  `python3`) is the ceiling, not the floor.
 
 ### Security constraints
 
@@ -148,6 +168,8 @@ Three specialized agent roles:
 - Ensure `debian/install` lists all shipped files
 - Verify `debian/rules` compatibility with debhelper 13
 - Check that new files have correct install paths
+- Reject any new `Depends:` entries unless absolutely unavoidable; the
+  package must stay minimal and dependency-free
 
 ### tester
 
@@ -166,8 +188,9 @@ Three specialized agent roles:
 
 Concise project context for GitHub Copilot code completion:
 
-- Project summary: Debian package providing one-command Juju on Ubuntu, modeled
-  after `lxd-installer`
+- Project summary: intentionally minimal Debian package providing one-command
+  Juju on Ubuntu, modeled after `lxd-installer`; no external dependencies,
+  scripts must be human-readable top-to-bottom
 - Language: POSIX sh only; no bashisms
 - Architecture: wrapper at `/sbin/juju`, three systemd socket-activated
   services (snap, LXD, K8s), privilege split via sockets
