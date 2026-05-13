@@ -1,3 +1,21 @@
+juju-installer (0.2.2) noble; urgency=medium
+
+  * Fix: propagate `relay_progress` failure to the wrapper. Each
+    `trigger_*_service` call site now uses `|| exit 1` so that a
+    service-script crash or unreachable socket exits the wrapper
+    promptly instead of silently falling through into `wait_for_snap`,
+    which loops for 90 seconds before reporting an unrelated timeout.
+    The post-merge progress-streaming spec incorrectly claimed
+    `set -e` covered this; corrected inline.
+  * Change `s.send(b"i")` to `s.sendall(b"i")` in `relay_progress`
+    (idiomatic; identical behavior for 1 byte on a stream socket).
+  * Test: new wall-clock regression test asserts the wrapper exits in
+    under 2 seconds when `relay_progress` fails, with a real (un-stubbed)
+    short `wait_for_snap` loop in the patched wrapper. Catches any
+    future re-introduction of the dead-wait. Suite now 71 tests.
+
+ -- Alex Lutay <alex.lutay@canonical.com>  Wed, 13 May 2026 13:00:00 +0000
+
 juju-installer (0.2.1) noble; urgency=medium
 
   * Stream service-side progress live to the user's terminal. Service

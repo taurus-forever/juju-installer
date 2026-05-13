@@ -221,8 +221,10 @@ lines total, both informative, no duplication.
 
 The Python helper is exhaustive on exit paths: success (`1` seen),
 EOF without terminator, or connect failure. No silent paths, no
-swallowed exceptions. `set -e` in `sbin/juju` ensures the wrapper
-exits if `relay_progress` returns non-zero.
+swallowed exceptions. Each `trigger_*_service` call site uses
+`|| exit 1` to propagate `relay_progress` failure to the wrapper, so
+the user does not stare at a silent `wait_for_snap` loop for 90
+seconds after an "exited unexpectedly" message.
 
 ## Concurrency and security
 

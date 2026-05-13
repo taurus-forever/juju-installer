@@ -102,7 +102,7 @@ except OSError:
                      "Is the package installed? "
                      "(sudo systemctl status %s.socket)\n" % (unit, unit))
     sys.exit(1)
-s.send(b"i")
+s.sendall(b"i")
 for raw in s.makefile("rb"):
     line = raw.rstrip(b"\n").decode("utf-8", "replace")
     if line == "1":
@@ -246,19 +246,19 @@ if [ ! -x "${SNAP_BIN}" ]; then
         if [ "$substrate" = "k8s" ]; then
             confirm_install "Would you like to install Juju and Canonical K8s snaps now (Y/n)?"
             show_progress "[1/9] Preparing Juju environment (this may take a few minutes)..."
-            trigger_k8s_service
+            trigger_k8s_service || exit 1
             wait_for_snap
             do_bootstrap_k8s
         else
             confirm_install "Would you like to install Juju and LXD snaps now (Y/n)?"
             show_progress "[1/5] Preparing Juju environment (this may take a few minutes)..."
-            trigger_lxd_service
+            trigger_lxd_service || exit 1
             wait_for_snap
             do_bootstrap_lxd
         fi
     else
         confirm_install "Would you like to install Juju snap now (Y/n)?"
-        trigger_snap_service
+        trigger_snap_service || exit 1
         wait_for_snap
     fi
 fi
