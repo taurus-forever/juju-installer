@@ -1,3 +1,44 @@
+juju-installer (0.2.1) noble; urgency=medium
+
+  * Stream service-side progress live to the user's terminal. Service
+    scripts now write [N/M] milestones over the existing socket (stdout)
+    instead of stderr; the wrapper's new relay_progress reads each line
+    and rewrites the user's rolling progress slot via show_progress, so
+    the long snap-install + Canonical-K8s bootstrap phase no longer
+    looks like a hang at [1/9].
+  * Surface service-side ERROR: lines permanently (not overwritten by
+    subsequent progress); EOF without the "1" terminator emits an
+    "exited unexpectedly. Run: sudo journalctl -u <unit>@\* -e" hint.
+    Unreachable socket emits a "cannot reach <unit>" hint.
+  * Renumber to coherent shared sequences: K8s [1/9]..[9/9], LXD
+    [1/5]..[5/5], snap-only [1/1] (visible for the first time).
+    [8/9] is reused for the two cloud-register / bootstrap sub-steps
+    inside do_bootstrap_k8s.
+  * Service scripts redirect underlying tool chatter (snap install,
+    k8s bootstrap, lxd init) to the journal via >&2 2>&1, keeping the
+    socket clean for the framed protocol.
+  * Tests: new mock-service helper spawns a real AF_UNIX listener with a
+    readiness sentinel; 8 new wrapper-level protocol tests + 3 new
+    service-level Layer-3 tests bring the suite to 69 tests.
+  * Resolve shellcheck SC2015 in test_services.sh chatter-leak assertions
+    (replace `A && B || C` pattern with `if A; then B; fi`).
+  * Fix: wait for local-storage to be functional (default StorageClass
+    present, no Pending pods) before exiting [6/9]. `k8s enable
+    local-storage` returns when the feature is toggled, not when the
+    provisioner is serving; juju bootstrap raced against an unready
+    provisioner and the controller PVC got stuck in "provisioning
+    failed" for the full bootstrap timeout. Fail fast in 60s with a
+    `kubectl describe`-pointing error if storage doesn't become ready.
+  * Fix: raise the K8s-path disk-space precheck from 5 GiB to 10 GiB.
+    Empirical failure on an 8.7 GiB disk: precheck passed (≥5 GiB at
+    script start), but snap installs + k8s bootstrap + image pulls
+    consumed enough that rawfile-csi later refused to allocate the
+    controller PVC with "ResourceExhausted: Not enough disk space".
+    5 GiB does not cover the full K8s bootstrap chain through PVC
+    allocation. LXD path's 5 GiB threshold is unchanged.
+
+ -- Alex Lutay <alex.lutay@canonical.com>  Wed, 13 May 2026 12:45:00 +0000
+
 juju-installer (0.1.8) noble; urgency=medium
 
   * Add integration test workflow (LXD and K8s parallel jobs).

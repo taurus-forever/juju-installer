@@ -35,9 +35,9 @@ make_fake_snap() {
 }
 
 make_sockets_writable() {
-    touch "${FAKE_SNAP_SOCKET}" && chmod 660 "${FAKE_SNAP_SOCKET}"
-    touch "${FAKE_LXD_SOCKET}" && chmod 660 "${FAKE_LXD_SOCKET}"
-    touch "${FAKE_K8S_SOCKET}" && chmod 660 "${FAKE_K8S_SOCKET}"
+    [ -e "${FAKE_SNAP_SOCKET}" ] || { touch "${FAKE_SNAP_SOCKET}" && chmod 660 "${FAKE_SNAP_SOCKET}"; }
+    [ -e "${FAKE_LXD_SOCKET}" ]  || { touch "${FAKE_LXD_SOCKET}"  && chmod 660 "${FAKE_LXD_SOCKET}";  }
+    [ -e "${FAKE_K8S_SOCKET}" ]  || { touch "${FAKE_K8S_SOCKET}"  && chmod 660 "${FAKE_K8S_SOCKET}";  }
 }
 
 patch_wrapper() {
@@ -703,6 +703,263 @@ test_k8s_skip_existing_cloud() {
     return $result
 }
 test_k8s_skip_existing_cloud; report "K8s: skips add-k8s when cloud exists" $?
+
+# ============================================================
+# Protocol streaming (real socket, real relay_progress)
+# ============================================================
+
+# `func; report ... $?` would exit on a failing test under set -e. The
+# if/else form below is exempt from set -e, so a failing protocol test
+# still reports and the section continues.
+run_proto_test() {
+    _proto_name="$1"
+    shift
+    if "$@"; then report "$_proto_name" 0; else report "$_proto_name" $?; fi
+}
+
+echo ""
+echo "=== Protocol streaming ==="
+
+# Spawns a Unix socket listener that:
+#   - signals readiness via $READY file (avoids connect() race)
+#   - accepts ONE connection
+#   - eats the mode byte
+#   - if SNAP_CREATE_PATH set, drops a fake juju snap (so wait_for_snap passes)
+#   - replays each line of $script_file followed by \n
+#   - "__CLOSE__" closes without sending more (simulates abnormal exit)
+start_mock_service() {
+    SOCK="$1"
+    SCRIPT="$2"
+    READY="${TEST_DIR}/mock-ready"
+    rm -f "$READY"
+    SOCK="$SOCK" SCRIPT="$SCRIPT" READY="$READY" \
+        SNAP_CREATE_PATH="${SNAP_CREATE_PATH:-}" python3 -c '
+import os, socket
+sock_path = os.environ["SOCK"]
+script = os.environ["SCRIPT"]
+ready = os.environ["READY"]
+snap_path = os.environ.get("SNAP_CREATE_PATH", "")
+try: os.unlink(sock_path)
+except FileNotFoundError: pass
+srv = socket.socket(socket.AF_UNIX); srv.bind(sock_path); srv.listen(1)
+os.chmod(sock_path, 0o660)
+open(ready, "w").close()
+conn, _ = srv.accept()
+conn.recv(1)
+if snap_path:
+    os.makedirs(os.path.dirname(snap_path), exist_ok=True)
+    with open(snap_path, "w") as f:
+        f.write("#!/bin/sh\necho mock-juju \"$@\"\n")
+    os.chmod(snap_path, 0o755)
+with open(script) as f:
+    for line in f:
+        line = line.rstrip("\n")
+        if line == "__CLOSE__": break
+        conn.sendall((line + "\n").encode())
+conn.close(); srv.close()
+' &
+    MOCK_PID=$!
+    i=0
+    while [ ! -f "$READY" ] && [ "$i" -lt 50 ]; do
+        sleep 0.1
+        i=$((i + 1))
+    done
+}
+
+stop_mock_service() {
+    if [ -n "${MOCK_PID:-}" ]; then
+        kill "$MOCK_PID" 2>/dev/null || true
+        wait "$MOCK_PID" 2>/dev/null || true
+        MOCK_PID=
+    fi
+}
+
+# Like patch_wrapper but does NOT stub trigger_*_service — exercises real relay_progress.
+patch_wrapper_with_real_relay() {
+    make_sockets_writable
+    PATCHED="${TEST_DIR}/wrapper.sh"
+    sed \
+        -e "s|SNAP_BIN=\"/snap/bin/juju\"|SNAP_BIN=\"${FAKE_SNAP_BIN}\"|" \
+        -e "s|/run/juju-installer-snap.socket|${FAKE_SNAP_SOCKET}|g" \
+        -e "s|/run/juju-installer-lxd.socket|${FAKE_LXD_SOCKET}|g" \
+        -e "s|/run/juju-installer-k8s.socket|${FAKE_K8S_SOCKET}|g" \
+        -e "s|/proc/self/cgroup|${FAKE_CGROUP}|g" \
+        "${WRAPPER}" > "${PATCHED}"
+    sed -i 's/read -r answer < \/dev\/tty || answer="y"/answer="y"/' "${PATCHED}"
+    sed -i "/^wait_for_snap() {/,/^}/ { s/sleep 1/sleep 0/; }" "${PATCHED}"
+    sed -i "/^has_lxd_controller() {/,/^}/c\\
+has_lxd_controller() { [ \"\${MOCK_HAS_LXD_CONTROLLER:-0}\" -eq 1 ]; }" "${PATCHED}"
+    sed -i "/^has_k8s_cloud() {/,/^}/c\\
+has_k8s_cloud() { [ \"\${MOCK_HAS_K8S_CLOUD:-0}\" -eq 1 ]; }" "${PATCHED}"
+    sed -i "/^has_k8s_controller() {/,/^}/c\\
+has_k8s_controller() { [ \"\${MOCK_HAS_K8S_CONTROLLER:-0}\" -eq 1 ]; }" "${PATCHED}"
+    sed -i "/^has_model() {/,/^}/c\\
+has_model() { [ \"\${MOCK_HAS_MODEL:-0}\" -eq 1 ]; }" "${PATCHED}"
+    sed -i "/^do_bootstrap_lxd() {/,/^}/c\\
+do_bootstrap_lxd() { BOOTSTRAPPED=1; }" "${PATCHED}"
+    sed -i "/^do_bootstrap_k8s() {/,/^}/c\\
+do_bootstrap_k8s() { BOOTSTRAPPED=1; }" "${PATCHED}"
+    chmod +x "${PATCHED}"
+}
+
+test_k8s_streams_all_steps() {
+    setup
+    SCRIPT="${TEST_DIR}/script"
+    cat > "$SCRIPT" <<EOF
+[2/9] Installing Juju snap...
+[3/9] Installing Canonical K8s...
+[4/9] Bootstrapping Canonical K8s...
+[5/9] Waiting for K8s to be ready...
+[6/9] Enabling local-storage...
+[7/9] Exporting kubeconfig...
+1
+EOF
+    SNAP_CREATE_PATH="${FAKE_SNAP_BIN}" start_mock_service "${FAKE_K8S_SOCKET}" "$SCRIPT"
+    patch_wrapper_with_real_relay
+    run_patched deploy postgresql-k8s --trust
+    result=0
+    for n in 2 3 4 5 6 7; do
+        assert_stderr_contains "\[${n}/9\]" || result=1
+    done
+    stop_mock_service
+    teardown
+    return $result
+}
+run_proto_test "relay: K8s streams [2/9]..[7/9] from service" test_k8s_streams_all_steps
+
+test_k8s_handles_clean_terminator() {
+    setup
+    SCRIPT="${TEST_DIR}/script"
+    printf '[2/9] foo\n1\n' > "$SCRIPT"
+    SNAP_CREATE_PATH="${FAKE_SNAP_BIN}" start_mock_service "${FAKE_K8S_SOCKET}" "$SCRIPT"
+    patch_wrapper_with_real_relay
+    run_patched deploy postgresql-k8s --trust
+    result=0
+    [ "$LAST_RC" -eq 0 ] || { echo "  ASSERT FAILED: expected exit 0, got $LAST_RC"; result=1; }
+    stop_mock_service
+    teardown
+    return $result
+}
+run_proto_test "relay: clean terminator → exit 0, bootstrap continues" test_k8s_handles_clean_terminator
+
+test_relay_eof_without_terminator() {
+    setup
+    SCRIPT="${TEST_DIR}/script"
+    printf '[2/9] foo\n__CLOSE__\n' > "$SCRIPT"
+    start_mock_service "${FAKE_K8S_SOCKET}" "$SCRIPT"
+    patch_wrapper_with_real_relay
+    run_patched deploy postgresql-k8s --trust
+    result=0
+    [ "$LAST_RC" -ne 0 ] || { echo "  ASSERT FAILED: expected non-zero exit"; result=1; }
+    assert_stderr_contains "exited unexpectedly" || result=1
+    assert_stderr_contains "journalctl" || result=1
+    stop_mock_service
+    teardown
+    return $result
+}
+run_proto_test "relay: EOF without terminator → ERROR" test_relay_eof_without_terminator
+
+test_relay_socket_missing() {
+    setup
+    # Regular file passes check_socket_access; relay_progress connect() will refuse.
+    make_sockets_writable
+    patch_wrapper_with_real_relay
+    run_patched deploy postgresql-k8s --trust
+    result=0
+    [ "$LAST_RC" -ne 0 ] || { echo "  ASSERT FAILED: expected non-zero exit"; result=1; }
+    assert_stderr_contains "cannot reach" || result=1
+    teardown
+    return $result
+}
+run_proto_test "relay: unreachable socket → ERROR" test_relay_socket_missing
+
+test_service_error_line_relayed() {
+    setup
+    SCRIPT="${TEST_DIR}/script"
+    printf 'ERROR: snap install failed\n__CLOSE__\n' > "$SCRIPT"
+    start_mock_service "${FAKE_K8S_SOCKET}" "$SCRIPT"
+    patch_wrapper_with_real_relay
+    run_patched deploy postgresql-k8s --trust
+    result=0
+    [ "$LAST_RC" -ne 0 ] || { echo "  ASSERT FAILED: expected non-zero exit"; result=1; }
+    assert_stderr_contains "snap install failed" || result=1
+    assert_stderr_contains "exited unexpectedly" || result=1
+    stop_mock_service
+    teardown
+    return $result
+}
+run_proto_test "relay: service ERROR + EOF tail both shown" test_service_error_line_relayed
+
+test_lxd_streams_all_steps() {
+    setup
+    SCRIPT="${TEST_DIR}/script"
+    printf '[2/5] Installing Juju snap...\n[3/5] Installing LXD...\n1\n' > "$SCRIPT"
+    SNAP_CREATE_PATH="${FAKE_SNAP_BIN}" start_mock_service "${FAKE_LXD_SOCKET}" "$SCRIPT"
+    patch_wrapper_with_real_relay
+    run_patched deploy postgresql
+    result=0
+    assert_stderr_contains "\[2/5\]" || result=1
+    assert_stderr_contains "\[3/5\]" || result=1
+    stop_mock_service
+    teardown
+    return $result
+}
+run_proto_test "relay: LXD streams [2/5]..[3/5] from service" test_lxd_streams_all_steps
+
+test_snap_only_streams() {
+    setup
+    SCRIPT="${TEST_DIR}/script"
+    printf '[1/1] Installing Juju snap...\n1\n' > "$SCRIPT"
+    SNAP_CREATE_PATH="${FAKE_SNAP_BIN}" start_mock_service "${FAKE_SNAP_SOCKET}" "$SCRIPT"
+    patch_wrapper_with_real_relay
+    run_patched version
+    result=0
+    assert_stderr_contains "\[1/1\]" || result=1
+    stop_mock_service
+    teardown
+    return $result
+}
+run_proto_test "relay: snap-only streams [1/1] from service" test_snap_only_streams
+
+test_k8s_8_9_label_shared() {
+    setup
+    SCRIPT="${TEST_DIR}/script"
+    printf '1\n' > "$SCRIPT"
+    SNAP_CREATE_PATH="${FAKE_SNAP_BIN}" start_mock_service "${FAKE_K8S_SOCKET}" "$SCRIPT"
+    make_sockets_writable
+    PATCHED="${TEST_DIR}/wrapper.sh"
+    # Same as patch_wrapper_with_real_relay but keep real do_bootstrap_k8s so we can
+    # observe the [8/9] reuse for cloud-register and controller-bootstrap.
+    sed \
+        -e "s|SNAP_BIN=\"/snap/bin/juju\"|SNAP_BIN=\"${FAKE_SNAP_BIN}\"|" \
+        -e "s|/run/juju-installer-snap.socket|${FAKE_SNAP_SOCKET}|g" \
+        -e "s|/run/juju-installer-lxd.socket|${FAKE_LXD_SOCKET}|g" \
+        -e "s|/run/juju-installer-k8s.socket|${FAKE_K8S_SOCKET}|g" \
+        -e "s|/proc/self/cgroup|${FAKE_CGROUP}|g" \
+        -e "s|/run/juju-installer-k8s-kubeconfig|${TEST_DIR}/kubeconfig|g" \
+        "${WRAPPER}" > "${PATCHED}"
+    sed -i 's/read -r answer < \/dev\/tty || answer="y"/answer="y"/' "${PATCHED}"
+    sed -i "/^wait_for_snap() {/,/^}/ { s/sleep 1/sleep 0/; }" "${PATCHED}"
+    sed -i "/^has_k8s_cloud() {/,/^}/c\\
+has_k8s_cloud() { false; }" "${PATCHED}"
+    sed -i "/^has_k8s_controller() {/,/^}/c\\
+has_k8s_controller() { false; }" "${PATCHED}"
+    sed -i "/^has_model() {/,/^}/c\\
+has_model() { false; }" "${PATCHED}"
+    sed -i "s|\${HOME}|${TEST_DIR}/home|g" "${PATCHED}"
+    mkdir -p "${TEST_DIR}/home/.kube"
+    echo "fake-kubeconfig" > "${TEST_DIR}/kubeconfig"
+    chmod +x "${PATCHED}"
+    run_patched deploy postgresql-k8s --trust
+    result=0
+    assert_stderr_contains "\[8/9\] Registering" || result=1
+    assert_stderr_contains "\[8/9\] Bootstrapping" || result=1
+    assert_stderr_contains "\[9/9\] Creating welcome model" || result=1
+    stop_mock_service
+    teardown
+    return $result
+}
+run_proto_test "K8s: [8/9] label shared between cloud-register and bootstrap" test_k8s_8_9_label_shared
 
 # ============================================================
 # Summary

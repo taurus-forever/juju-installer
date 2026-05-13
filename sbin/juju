@@ -88,25 +88,49 @@ is_deploy_command() {
 
 # --- Service triggers ---
 
+relay_progress() {
+    PYSOCK="$1" PYUNIT="$2" python3 -c '
+import os, socket, sys
+sock_path = os.environ["PYSOCK"]
+unit = os.environ["PYUNIT"]
+try:
+    s = socket.socket(socket.AF_UNIX)
+    s.connect(sock_path)
+except OSError:
+    sys.stderr.write("\r%-70s\r" % "")
+    sys.stderr.write("ERROR: cannot reach %s. "
+                     "Is the package installed? "
+                     "(sudo systemctl status %s.socket)\n" % (unit, unit))
+    sys.exit(1)
+s.send(b"i")
+for raw in s.makefile("rb"):
+    line = raw.rstrip(b"\n").decode("utf-8", "replace")
+    if line == "1":
+        sys.exit(0)
+    if line.startswith("ERROR:"):
+        sys.stderr.write("\r%-70s\r" % "")
+        sys.stderr.write(line + "\n")
+        sys.stderr.flush()
+        continue
+    sys.stderr.write("\r%-70s" % line[:70])
+    sys.stderr.flush()
+sys.stderr.write("\r%-70s\r" % "")
+sys.stderr.write("ERROR: %s service exited unexpectedly. "
+                 "Run: sudo journalctl -u %s@\\* -e\n" % (unit, unit))
+sys.exit(1)
+'
+}
+
 trigger_snap_service() {
-    python3 -c '
-import socket; s=socket.socket(socket.AF_UNIX)
-s.connect("/run/juju-installer-snap.socket"); s.send(b"i"); s.recv(1)
-' >/dev/null
+    relay_progress /run/juju-installer-snap.socket juju-installer-snap
 }
 
 trigger_lxd_service() {
-    python3 -c '
-import socket; s=socket.socket(socket.AF_UNIX)
-s.connect("/run/juju-installer-lxd.socket"); s.send(b"i"); s.recv(1)
-' >/dev/null
+    relay_progress /run/juju-installer-lxd.socket juju-installer-lxd
 }
 
 trigger_k8s_service() {
-    python3 -c '
-import socket; s=socket.socket(socket.AF_UNIX)
-s.connect("/run/juju-installer-k8s.socket"); s.send(b"i"); s.recv(1)
-' >/dev/null
+    relay_progress /run/juju-installer-k8s.socket juju-installer-k8s
 }
 
 wait_for_snap() {
@@ -177,7 +201,7 @@ do_bootstrap_k8s() {
     chmod 600 "${HOME}/.kube/config"
 
     if ! has_k8s_cloud; then
-        show_progress "[7/9] Registering Canonical K8s cloud..."
+        show_progress "[8/9] Registering Canonical K8s cloud..."
         if ! timeout 60 "${SNAP_BIN}" add-k8s ck8s --client >/dev/null 2>&1; then
             clear_progress
             echo "ERROR: Failed to register K8s cloud. Re-run the command to retry." >&2

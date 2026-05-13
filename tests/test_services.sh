@@ -111,6 +111,16 @@ report() {
     fi
 }
 
+# set -e + run_service's internal set -e together cause "func; report ... $?"
+# to exit on first failing test. The if/else form is exempt from set -e.
+# Use _proto_name (not name) — POSIX sh has no `local`, and several helpers
+# (make_fake_bin, patch_service) overwrite a plain `name` variable.
+run_test() {
+    _proto_name="$1"
+    shift
+    if "$@"; then report "$_proto_name" 0; else report "$_proto_name" $?; fi
+}
+
 # ============================================================
 # Snap service tests
 # ============================================================
@@ -151,12 +161,29 @@ test_snap_signal_protocol() {
     patch_service "juju-installer-snap-service"
     run_service
     result=0
-    output=$(cat "${TEST_DIR}/stdout")
-    [ "$output" = "1" ] || { echo "  ASSERT FAILED: expected stdout '1', got '${output}'"; result=1; }
+    last_line=$(tail -n 1 "${TEST_DIR}/stdout")
+    [ "$last_line" = "1" ] || { echo "  ASSERT FAILED: expected last stdout line '1', got '${last_line}'"; result=1; }
     teardown
     return $result
 }
-test_snap_signal_protocol; report "snap: sends exactly '1' on stdout" $?
+run_test "snap: terminator '1' is the final stdout line" test_snap_signal_protocol
+
+test_snap_progress_on_stdout() {
+    setup
+    make_fake_bin "snap"
+    patch_service "juju-installer-snap-service"
+    run_service
+    result=0
+    assert_stdout_contains "\[1/1\] Installing Juju snap" || result=1
+    # Tool chatter (snap install ...) must not leak onto stdout (= socket)
+    if grep -q "snap install" "${TEST_DIR}/stdout"; then
+        echo "  ASSERT FAILED: 'snap install' chatter leaked to stdout"
+        result=1
+    fi
+    teardown
+    return $result
+}
+run_test "snap: [1/1] on stdout, no chatter leak" test_snap_progress_on_stdout
 
 # ============================================================
 # LXD service tests
@@ -179,12 +206,12 @@ test_lxd_full_install() {
     run_service
     result=0
     assert_call_log_contains "snap install juju" || result=1
-    assert_stderr_contains "Installing Juju" || result=1
+    assert_stdout_contains "\[2/5\] Installing Juju" || result=1
     assert_stdout_contains "1" || result=1
     teardown
     return $result
 }
-test_lxd_full_install; report "lxd: full install path" $?
+run_test "lxd: full install path" test_lxd_full_install
 
 test_lxd_snap_exists() {
     setup
@@ -233,11 +260,11 @@ test_lxd_install_timeout() {
     run_service
     result=0
     [ "$LAST_RC" -ne 0 ] || { echo "  ASSERT FAILED: expected non-zero exit"; result=1; }
-    assert_stderr_contains "timed out" || result=1
+    assert_stdout_contains "timed out" || result=1
     teardown
     return $result
 }
-test_lxd_install_timeout; report "lxd: timeout when lxd never appears" $?
+run_test "lxd: timeout when lxd never appears" test_lxd_install_timeout
 
 test_lxd_idempotent() {
     setup
@@ -285,6 +312,13 @@ case "$1" in
         ;;
     enable)
         ;;
+    kubectl)
+        shift
+        case "$1 $2" in
+            "get sc") echo "ck8s-default (default)   rancher.io/local-path   Delete   WaitForFirstConsumer   false   1m" ;;
+            "get pods") ;;
+        esac
+        ;;
 esac
 FAKEOF
     chmod +x "${FAKE_BIN}/k8s"
@@ -297,6 +331,13 @@ make_k8s_fake_ready() {
 case "$1" in
     status) echo "cluster status:  ready"; echo "local-storage    enabled"; exit 0 ;;
     config) echo "fake-kubeconfig-data" ;;
+    kubectl)
+        shift
+        case "$1 $2" in
+            "get sc") echo "ck8s-default (default)   rancher.io/local-path   Delete   WaitForFirstConsumer   false   1m" ;;
+            "get pods") ;;
+        esac
+        ;;
 esac
 FAKEOF
     chmod +x "${FAKE_BIN}/k8s"
@@ -334,6 +375,13 @@ case "$1" in
     bootstrap) touch "$0.bootstrapped" ;;
     config) echo "fake-kubeconfig-data" ;;
     enable) ;;
+    kubectl)
+        shift
+        case "$1 $2" in
+            "get sc") echo "ck8s-default (default)   rancher.io/local-path   Delete   WaitForFirstConsumer   false   1m" ;;
+            "get pods") ;;
+        esac
+        ;;
 esac
 FAKEOF
     chmod +x "${K8S_STAGED}"
@@ -409,11 +457,11 @@ FAKEOF
     run_service
     result=0
     [ "$LAST_RC" -ne 0 ] || { echo "  ASSERT FAILED: expected non-zero exit"; result=1; }
-    assert_stderr_contains "did not become ready" || result=1
+    assert_stdout_contains "did not become ready" || result=1
     teardown
     return $result
 }
-test_k8s_not_ready_timeout; report "k8s: timeout when cluster not ready" $?
+run_test "k8s: timeout when cluster not ready" test_k8s_not_ready_timeout
 
 test_k8s_storage_already_enabled() {
     setup
@@ -463,6 +511,126 @@ test_k8s_idempotent() {
     return $result
 }
 test_k8s_idempotent; report "k8s: idempotent, only exports kubeconfig" $?
+
+test_k8s_storage_not_ready() {
+    setup
+    make_fake_bin "snap"
+    make_fake_bin "juju"
+    # k8s fake: cluster ready, local-storage "enabled" via status,
+    # but kubectl get sc reports no (default) → wait loop times out.
+    printf '#!/bin/sh\necho "k8s $@" >> "%s"\n' "${CALL_LOG}" > "${FAKE_BIN}/k8s"
+    cat >> "${FAKE_BIN}/k8s" << 'FAKEOF'
+case "$1" in
+    status) echo "cluster status:  ready"; echo "local-storage    enabled"; exit 0 ;;
+    config) echo "fake-kubeconfig-data" ;;
+    kubectl)
+        shift
+        case "$1 $2" in
+            "get sc") echo "some-class   rancher.io/local-path   Delete   WaitForFirstConsumer   false   1m" ;;
+            "get pods") ;;
+        esac
+        ;;
+esac
+FAKEOF
+    chmod +x "${FAKE_BIN}/k8s"
+    patch_service "juju-installer-k8s-service"
+    # Shrink the 30-iteration storage-ready loop to 1 iteration
+    sed -i 's/while \[ "\$i" -lt 30 \]/while [ "$i" -lt 1 ]/' "${PATCHED}"
+    run_service
+    result=0
+    [ "$LAST_RC" -ne 0 ] || { echo "  ASSERT FAILED: expected non-zero exit"; result=1; }
+    assert_stdout_contains "No default StorageClass" || result=1
+    teardown
+    return $result
+}
+test_k8s_storage_not_ready; report "k8s: fails fast when storage not ready" $?
+
+echo ""
+echo "=== Service stdout protocol (Layer 3) ==="
+
+test_k8s_progress_on_stdout() {
+    setup
+    K8S_STAGED="${TEST_DIR}/k8s_staged"
+    printf '#!/bin/sh\necho "k8s $@" >> "%s"\n' "${CALL_LOG}" > "${K8S_STAGED}"
+    cat >> "${K8S_STAGED}" << 'FAKEOF'
+case "$1" in
+    status)
+        if [ -f "$0.bootstrapped" ]; then
+            echo "cluster status:  ready"
+            [ -f "$0.storage" ] && echo "local-storage    enabled"
+            exit 0
+        fi
+        exit 1
+        ;;
+    bootstrap) touch "$0.bootstrapped" ;;
+    config) echo "fake-kubeconfig-data" ;;
+    enable) touch "$0.storage" ;;
+    kubectl)
+        shift
+        case "$1 $2" in
+            "get sc") echo "ck8s-default (default)   rancher.io/local-path   Delete   WaitForFirstConsumer   false   1m" ;;
+            "get pods") ;;
+        esac
+        ;;
+esac
+FAKEOF
+    chmod +x "${K8S_STAGED}"
+    cat > "${FAKE_BIN}/snap" << SNAPEOF
+#!/bin/sh
+echo "snap \$@" >> "${CALL_LOG}"
+case "\$2" in
+    juju) ln -sf /bin/true "${FAKE_BIN}/juju" ;;
+    k8s) cp "${K8S_STAGED}" "${FAKE_BIN}/k8s"; chmod +x "${FAKE_BIN}/k8s" ;;
+esac
+SNAPEOF
+    chmod +x "${FAKE_BIN}/snap"
+    patch_service "juju-installer-k8s-service"
+    run_service
+    result=0
+    for n in 2 3 4 5 6 7; do
+        assert_stdout_contains "\[${n}/9\]" || result=1
+    done
+    last_line=$(tail -n 1 "${TEST_DIR}/stdout")
+    [ "$last_line" = "1" ] || { echo "  ASSERT FAILED: expected last stdout line '1', got '${last_line}'"; result=1; }
+    if grep -q "snap install" "${TEST_DIR}/stdout"; then
+        echo "  ASSERT FAILED: 'snap install' chatter leaked to stdout"
+        result=1
+    fi
+    if grep -q "k8s bootstrap" "${TEST_DIR}/stdout"; then
+        echo "  ASSERT FAILED: 'k8s bootstrap' chatter leaked to stdout"
+        result=1
+    fi
+    teardown
+    return $result
+}
+run_test "k8s: [2/9]..[7/9] on stdout, terminator last, no chatter leak" test_k8s_progress_on_stdout
+
+test_lxd_progress_on_stdout() {
+    setup
+    make_fake_bin "snap"
+    make_fake_bin "lxc" 'echo ""'
+    make_fake_bin "lxd"
+    patch_service "juju-installer-lxd-service"
+    sed -i "/python3 -c/c\\    ${FAKE_BIN}/snap install-lxd-stub" "${PATCHED}"
+    sed -i "s|${FAKE_BIN}/snap install-lxd-stub|${FAKE_BIN}/snap install-lxd-stub; ln -sf /bin/true ${FAKE_BIN}/lxd|" "${PATCHED}"
+    run_service
+    result=0
+    assert_stdout_contains "\[2/5\] Installing Juju" || result=1
+    assert_stdout_contains "\[3/5\]" || result=1
+    last_line=$(tail -n 1 "${TEST_DIR}/stdout")
+    [ "$last_line" = "1" ] || { echo "  ASSERT FAILED: expected last stdout line '1', got '${last_line}'"; result=1; }
+    if grep -q "snap install" "${TEST_DIR}/stdout"; then
+        echo "  ASSERT FAILED: 'snap install' chatter leaked to stdout"
+        result=1
+    fi
+    if grep -q "lxd init" "${TEST_DIR}/stdout"; then
+        echo "  ASSERT FAILED: 'lxd init' chatter leaked to stdout"
+        result=1
+    fi
+    teardown
+    return $result
+}
+run_test "lxd: [2/5]..[3/5] on stdout, terminator last, no chatter leak" test_lxd_progress_on_stdout
 
 # ============================================================
 # Summary
