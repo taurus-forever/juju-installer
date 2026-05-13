@@ -1,3 +1,28 @@
+juju-installer (0.2.1) noble; urgency=medium
+
+  * Stream service-side progress live to the user's terminal. Service
+    scripts now write [N/M] milestones over the existing socket (stdout)
+    instead of stderr; the wrapper's new relay_progress reads each line
+    and rewrites the user's rolling progress slot via show_progress, so
+    the long snap-install + Canonical-K8s bootstrap phase no longer
+    looks like a hang at [1/9].
+  * Surface service-side ERROR: lines permanently (not overwritten by
+    subsequent progress); EOF without the "1" terminator emits an
+    "exited unexpectedly. Run: sudo journalctl -u <unit>@\* -e" hint.
+    Unreachable socket emits a "cannot reach <unit>" hint.
+  * Renumber to coherent shared sequences: K8s [1/9]..[9/9], LXD
+    [1/5]..[5/5], snap-only [1/1] (visible for the first time).
+    [8/9] is reused for the two cloud-register / bootstrap sub-steps
+    inside do_bootstrap_k8s.
+  * Service scripts redirect underlying tool chatter (snap install,
+    k8s bootstrap, lxd init) to the journal via >&2 2>&1, keeping the
+    socket clean for the framed protocol.
+  * Tests: new mock-service helper spawns a real AF_UNIX listener with a
+    readiness sentinel; 8 new wrapper-level protocol tests + 3 new
+    service-level Layer-3 tests bring the suite to 69 tests.
+
+ -- Alex Lutay <alex.lutay@canonical.com>  Wed, 13 May 2026 12:20:00 +0000
+
 juju-installer (0.1.8) noble; urgency=medium
 
   * Add integration test workflow (LXD and K8s parallel jobs).
