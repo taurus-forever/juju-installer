@@ -176,7 +176,10 @@ test_snap_progress_on_stdout() {
     result=0
     assert_stdout_contains "\[1/1\] Installing Juju snap" || result=1
     # Tool chatter (snap install ...) must not leak onto stdout (= socket)
-    grep -q "snap install" "${TEST_DIR}/stdout" && { echo "  ASSERT FAILED: 'snap install' chatter leaked to stdout"; result=1; } || true
+    if grep -q "snap install" "${TEST_DIR}/stdout"; then
+        echo "  ASSERT FAILED: 'snap install' chatter leaked to stdout"
+        result=1
+    fi
     teardown
     return $result
 }
@@ -528,8 +531,14 @@ SNAPEOF
     done
     last_line=$(tail -n 1 "${TEST_DIR}/stdout")
     [ "$last_line" = "1" ] || { echo "  ASSERT FAILED: expected last stdout line '1', got '${last_line}'"; result=1; }
-    grep -q "snap install" "${TEST_DIR}/stdout" && { echo "  ASSERT FAILED: 'snap install' chatter leaked to stdout"; result=1; } || true
-    grep -q "k8s bootstrap" "${TEST_DIR}/stdout" && { echo "  ASSERT FAILED: 'k8s bootstrap' chatter leaked to stdout"; result=1; } || true
+    if grep -q "snap install" "${TEST_DIR}/stdout"; then
+        echo "  ASSERT FAILED: 'snap install' chatter leaked to stdout"
+        result=1
+    fi
+    if grep -q "k8s bootstrap" "${TEST_DIR}/stdout"; then
+        echo "  ASSERT FAILED: 'k8s bootstrap' chatter leaked to stdout"
+        result=1
+    fi
     teardown
     return $result
 }
@@ -549,8 +558,14 @@ test_lxd_progress_on_stdout() {
     assert_stdout_contains "\[3/5\]" || result=1
     last_line=$(tail -n 1 "${TEST_DIR}/stdout")
     [ "$last_line" = "1" ] || { echo "  ASSERT FAILED: expected last stdout line '1', got '${last_line}'"; result=1; }
-    grep -q "snap install" "${TEST_DIR}/stdout" && { echo "  ASSERT FAILED: 'snap install' chatter leaked to stdout"; result=1; } || true
-    grep -q "lxd init" "${TEST_DIR}/stdout" && { echo "  ASSERT FAILED: 'lxd init' chatter leaked to stdout"; result=1; } || true
+    if grep -q "snap install" "${TEST_DIR}/stdout"; then
+        echo "  ASSERT FAILED: 'snap install' chatter leaked to stdout"
+        result=1
+    fi
+    if grep -q "lxd init" "${TEST_DIR}/stdout"; then
+        echo "  ASSERT FAILED: 'lxd init' chatter leaked to stdout"
+        result=1
+    fi
     teardown
     return $result
 }
