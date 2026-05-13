@@ -44,6 +44,14 @@ not a command channel.
 
 ## Installation
 
+### From PPA (recommended)
+
+```bash
+sudo add-apt-repository ppa:taurus/juju-installer
+sudo apt update
+sudo apt install juju-installer
+```
+
 ### From .deb (local build)
 
 ```bash
